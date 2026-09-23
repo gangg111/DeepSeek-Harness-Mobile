@@ -1,6 +1,6 @@
 # DSH Mobile — DeepSeek Harness na Androidzie
 
-**DeepSeek Harness w jednej apce na telefon: bez Termuxa, bez roota, po polsku, z kompletem narzędzi programistycznych.**
+**DeepSeek Harness w jednej apce na telefon, bez Termuxa i roota, po polsku, z kompletem narzędzi programistycznych.**
 
 *English summary: a self-contained Android APK that runs the full [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (Node.js agent harness with a web GUI) on-device, with a bundled toolchain (C/C++ via Zig, JDK 21, Kotlin, Python 3.14, Node 26, jadx, apktool, git, ffmpeg…), a Polish language pack, a curated set of community plugins, Edge TTS and an in-app updater. Built entirely inside Termux on an arm64 phone.*
 
@@ -10,34 +10,34 @@
 
 Apka pakuje w jeden plik APK:
 
-- **DeepSeek Harness** (`@deepseek-ai/dsh`, profil web) uruchamiany na wbudowanym **Node.js 26** z Termuxa,
-- **interfejs po polsku** (pakiet językowy przez oficjalny mechanizm locale dsh, 41 obszarów, 1219 napisów),
-- **komplet narzędzi dla modelu**, wszystkie na `PATH` narzędzia `bash`:
+- **DeepSeek Harness** (`@deepseek-ai/dsh`, profil web) uruchamiany na wbudowanym Node.js 26 z Termuxa,
+- **polski interfejs** (pakiet językowy przez oficjalny mechanizm locale dsh, 41 obszarów, 1219 napisów),
+- **narzędzia dla modelu**, wszystkie na `PATH` narzędzia `bash`:
   - kompilatory: `cc`/`gcc`/`clang`/`c++`/`g++` (Zig, statyczne binarki działające na Androidzie), JDK 21 (`java`, `javac`, `jar`, `javap`, `jshell`), `kotlinc`, Python 3.14 z pip i numpy, Node 26 z npm/npx, `make`, `cmake`,
   - inżynieria wsteczna: `jadx`, `apktool`, `d2j-dex2jar` i reszta dex2jar, `aapt`, `aapt2`, GNU binutils (`objdump`, `nm`, `readelf`, `strings`, `ar`, `ld`, `as`),
   - system: GNU coreutils, `sed`, `gawk`, `grep`, `find`, `diff`, `patch`, `tar`, `gzip`, `xz`, `bzip2`, `zip`, `unzip`, `rg`, `fd`, `jq`, `tree`, `file`, `curl`, `wget`, `git` (HTTPS), `sqlite3`, `openssl`, `ffmpeg`, `ffprobe`,
-- **pluginy społeczności**: mobilny UI (dsh-qol), pamięć między sesjami, cofanie tur z przywracaniem plików, bezpieczniki pętli (repeat-stop, tool-budget), 87 skilli inżynierii wstecznej, edycja plików diffem, zegar w kontekście, lista zadań między turami, most MCP po stdio, **TTS** (Edge TTS z polskimi głosami, równoległa synteza fragmentów),
-- **usługę pierwszoplanową** trzymającą serwer przy życiu w tle (powiadomienie z przyciskami „Zatrzymaj" i „Aktualizuj"),
+- **pluginy społeczności**: mobilny UI (dsh-qol), pamięć między sesjami, cofanie tur z przywracaniem plików, bezpieczniki pętli (repeat-stop, tool-budget), 87 skilli inżynierii wstecznej, edycja plików diffem, zegar w kontekście, lista zadań między turami, most MCP po stdio, TTS (Edge TTS z polskimi głosami, równoległa synteza fragmentów),
+- **usługę pierwszoplanową**, która trzyma serwer w tle (powiadomienie z przyciskami „Zatrzymaj" i „Aktualizuj"),
 - **aktualizator w apce**: wbudowany npm pobiera nową wersję dsh, nakłada łatki pod Androida z prekompilowanych plików, testuje start i dopiero wtedy podmienia katalog.
 
 ## Instalacja
 
 1. Pobierz `dsh-mobile.apk` z [Releases](../../releases) (ok. 600 MB).
-2. Zezwól na instalację z nieznanych źródeł dla menedżera plików i zainstaluj.
-3. Pierwsze uruchomienie rozpakowuje ok. 1,3 GB (60 tys. plików) do pamięci apki, kilka minut z licznikiem na ekranie. Kolejne starty trwają kilka sekund.
-4. Zezwól na dostęp do plików: agent pracuje domyślnie w `Pobranych`, a apka pisze tam log (`Download/dsh_log.txt`).
+2. Zezwól menedżerowi plików na instalację z nieznanych źródeł i zainstaluj.
+3. Pierwsze uruchomienie rozpakowuje ok. 1,3 GB (60 tys. plików) do pamięci apki. Trwa kilka minut, postęp widać na liczniku. Kolejne starty trwają kilka sekund.
+4. Zezwól na dostęp do plików: agent pracuje domyślnie w `Pobranych`, tam też apka zapisuje log (`Download/dsh_log.txt`).
 5. Wpisz klucz API DeepSeek w oknie powitalnym harnessu.
 
 Wymagania: Android 9+ (targetSdk 28 celowo, patrz niżej), arm64, ok. 2 GB wolnego miejsca.
 
 ## Użycie
 
-- Interfejs jest w oknie apki, serwer nasłuchuje tylko na `127.0.0.1:3090`, każdy start ma nowy token.
+- Interfejs działa w oknie apki, serwer nasłuchuje tylko na `127.0.0.1:3090`, każdy start dostaje nowy token.
 - Język: Ustawienia → Ogólne → Język (domyślnie polski, gdy system jest polski).
-- Tryb uprawnień: apka ustawia `danger-full-access`, bo jądro Androida nie ma Landlocka ani bubblewrapa, a dsh w trybach z sandboxem odmawia uruchamiania komend. Izolację zapewnia sam Android (katalog apki + pamięć współdzielona).
-- TTS: przycisk głośnika przy odpowiedzi, przełącznik „Czytaj automatycznie" w kompozytorze, ustawienia w Ustawienia → Pluginy → Głos. Domyślny głos `pl-PL-ZofiaNeural`, liczba równoległych syntez `DSH_TTS_EDGE_PARALLEL` (domyślnie 30).
+- Tryb uprawnień: apka ustawia `danger-full-access`, bo jądro Androida nie ma Landlocka ani bubblewrapa, a dsh w trybach z sandboxem odmawia uruchamiania komend. Procesy izoluje sam Android (katalog apki + pamięć współdzielona).
+- TTS: przycisk głośnika przy odpowiedzi, przełącznik „Czytaj automatycznie" w kompozytorze, ustawienia w Ustawienia → Pluginy → Głos. Domyślny głos `pl-PL-ZofiaNeural`, liczbę równoległych syntez ustawia `DSH_TTS_EDGE_PARALLEL` (domyślnie 30).
 - Aktualizacja dsh: powiadomienie → „Aktualizuj". Po starcie apka sprawdza npm i pokazuje dostępną wersję.
-- `AGENTS.md` w katalogu roboczym jest wstrzykiwany do kontekstu modelu.
+- `AGENTS.md` z katalogu roboczego trafia do kontekstu modelu.
 
 ## Jak to działa
 
@@ -60,12 +60,12 @@ APK
 └── MainActivity                 WebView z adresem serwera (token ze stdout)
 ```
 
-Rzeczy, które trzeba było obejść, żeby Node i dsh z Termuxa działały w cudzej apce:
+Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 
 | Problem | Rozwiązanie |
 |---|---|
 | binarki Termuxa mają wkompilowany prefiks `/data/data/com.termux/files/usr` | `LD_LIBRARY_PATH`, `OPENSSL_CONF=/dev/null`, `SSL_CERT_FILE`, `GIT_EXEC_PATH`, `MAGIC`, `CMAKE_ROOT`… (`tools.env`) |
-| exec i dlopen z katalogu danych apki blokowane od API 29 | `targetSdk 28` (tak samo robi Termux) |
+| od API 29 Android blokuje exec i dlopen z katalogu danych apki | `targetSdk 28` (tak samo robi Termux) |
 | SELinux zabrania hardlinków `link()` | shim podmieniający `fs.link` na `copyFile(COPYFILE_EXCL)` |
 | addon `flock` tylko dla linux/darwin | `flock.c` skompilowany clangiem jako `node-addon-system-android-arm64` + patch loadera |
 | `sharp` bez binarki android-arm64 | wariant WebAssembly |
@@ -76,7 +76,7 @@ Rzeczy, które trzeba było obejść, żeby Node i dsh z Termuxa działały w cu
 
 ## Budowanie ze źródeł (Termux, arm64)
 
-Wymagania: Termux z `nodejs` (26), `python` (3.14), `clang`, `openjdk-21`, `git`, `zip`, `aapt2`, `apksigner`, `gradle` przez wrapper projektu, oraz pakiety narzędzi kopiowanych do payloadu (`binutils`, `ripgrep`, `fd`, `jq`, `tree`, `file`, `ffmpeg`, `sqlite`, `kotlin`, `dex2jar`, `cmake`, `make`, `python-numpy`…). Szczegóły pułapek Gradle/aapt2 na Termuxie: `app/gradle.properties`.
+Wymagania: Termux z `nodejs` (26), `python` (3.14), `clang`, `openjdk-21`, `git`, `zip`, `aapt2`, `apksigner`, `gradle` przez wrapper projektu, oraz pakiety narzędzi kopiowanych do payloadu (`binutils`, `ripgrep`, `fd`, `jq`, `tree`, `file`, `ffmpeg`, `sqlite`, `kotlin`, `dex2jar`, `cmake`, `make`, `python-numpy`…). Pułapki Gradle/aapt2 na Termuxie opisuje `app/gradle.properties`.
 
 ```sh
 # 1. instalacja dsh z łatkami pod Androida (raz; potem robi to update.sh)
@@ -87,20 +87,20 @@ tools/build-tools.sh
 ./update.sh                 # opcje: --tag alpha|X.Y.Z  --skip-npm  --force  --debug
 ```
 
-`update.sh` kończy podpisanym APK w `/sdcard/Download/dsh-mobile.apk`. Podpis release oczekuje klucza `~/.android/ciuchy-release.jks` (alias `ciuchy`, hasło w `~/.android/ciuchy-release.pass`); zmień `signingConfigs` w `app/app/build.gradle.kts` na własny klucz albo użyj `--debug`.
+`update.sh` zapisuje podpisany APK w `/sdcard/Download/dsh-mobile.apk`. Podpis release używa klucza `~/.android/ciuchy-release.jks` (alias `ciuchy`, hasło w `~/.android/ciuchy-release.pass`); zmień `signingConfigs` w `app/app/build.gradle.kts` na własny klucz albo użyj `--debug`.
 
-Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku), `update.sh` sam testuje start dsh na wystawionym runtime przed pakowaniem.
+Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku). `update.sh` przed pakowaniem sam testuje start dsh na gotowym runtime.
 
 ## Tłumaczenie
 
-- Interfejs dsh: `locale-pl/pl-1..4.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. Brakujące klucze po aktualizacji dsh spadają na angielski; `update.sh` wypisuje listę „BRAK TŁUMACZEŃ".
-- Pluginy społeczności nie używają mechanizmu locale dsh (chińskie napisy na sztywno albo własne słowniki zh/en), dlatego są spolszczone łatkami `android-patches/{qol,rewind,tts}-polish.mjs`. Gdy autor zmieni tekst, łatka zatrzymuje aktualizację z komunikatem zamiast po cichu przepuścić chiński.
+- Interfejs dsh: `locale-pl/pl-1..4.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. Po aktualizacji dsh brakujące klucze wyświetlają się po angielsku; `update.sh` wypisuje listę „BRAK TŁUMACZEŃ".
+- Pluginy społeczności nie korzystają z mechanizmu locale dsh (chińskie napisy na sztywno albo własne słowniki zh/en), więc spolszczają je łatki `android-patches/{qol,rewind,tts}-polish.mjs`. Gdy autor zmieni tekst, łatka zatrzymuje aktualizację z komunikatem, żeby chińskie napisy nie przeszły po cichu.
 
 ## Ograniczenia
 
-- Brak menedżera pakietów w apce: pip buduje tylko czyste pakiety Pythona, npm tylko pakiety bez części natywnej.
-- Aktualizator w apce wymaga tej samej wersji `node-pty`, co prekompilowana; inaczej odsyła do `update.sh` w Termuxie (tam jest kompilator).
-- 30 równoległych połączeń do Edge TTS to dużo; przy bardzo długich odpowiedziach Microsoft może odrzucać część, plugin ponawia i w ostateczności pomija fragment.
+- Apka nie ma menedżera pakietów: pip buduje tylko czyste pakiety Pythona, npm instaluje tylko pakiety bez części natywnej.
+- Aktualizator w apce wymaga tej samej wersji `node-pty` co prekompilowana; przy innej odsyła do `update.sh` w Termuxie (tam jest kompilator).
+- Przy 30 równoległych połączeniach i bardzo długich odpowiedziach Microsoft może odrzucać część z nich; plugin ponawia fragment, a w ostateczności go pomija.
 - Rozmiar: APK ok. 600 MB, po rozpakowaniu ok. 1,5 GB.
 
 ## Licencje komponentów
