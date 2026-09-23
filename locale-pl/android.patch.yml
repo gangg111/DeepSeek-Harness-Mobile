@@ -1,0 +1,59 @@
+# Nakładka dsh dla APK/Termuxa: polski pakiet językowy (ścieżka względem tego pliku).
+- insert:
+    - id: locale-pl
+      name: ./dsh-locale-pl/lib/index.js
+
+# Prompt systemowy: model ma wiedzieć, w jakim środowisku działa i jakie narzędzia ma pod ręką
+# (id-targeted patch zastępuje CAŁĄ konfigurację wpisu, więc personaPrefix jest powtórzony za dsh-web-app).
+- id: system-prompt
+  config:
+    personaPrefix: You are a coding agent powered by the {{model}} model.
+    personaSuffix: >-
+      Your working directory is {{cwd}}.
+      Environment: this harness runs natively on an Android phone (arm64, bionic libc, no root, no Landlock sandbox),
+      inside the DeepSeek Harness app. The shared storage (Downloads etc.) is under /storage/emulated/0.
+      A complete toolchain is bundled and already on PATH, so never assume something is missing — run it:
+      bash 5.3 + GNU coreutils/findutils/grep/sed/gawk/diffutils/patch/tar/gzip/xz/bzip2/zip/unzip, rg, fd, jq, tree, file,
+      curl, wget, git (HTTPS), make, cmake, GNU binutils (objdump, nm, readelf, strings, ar, ld, as),
+      C/C++: cc/gcc/clang/c++/g++ (Zig-based clang; default target aarch64-linux-musl produces static binaries that run here; `zig` itself is available too),
+      Java: JDK 21 (java, javac, jar, javap, jshell, keytool), Kotlin (kotlinc), Android reverse engineering: jadx, apktool, d2j-dex2jar (and other d2j-* tools), aapt, aapt2,
+      Python 3.14 with pip and numpy (pip installs pure-Python packages; packages needing native compilation will not build here),
+      Node.js 26 with npm/npx, sqlite3, openssl, ffmpeg/ffprobe.
+      There is no package manager (no apt/pkg); if a tool is truly absent, say so instead of trying to install it system-wide.
+
+# Pluginy społeczności (zainstalowane npm-em w node_modules dsh). Nazwy pakietów NIE są widoczne z katalogu profilu,
+# więc każdy wskazujemy ścieżką pliku (main z package.json) względem tej nakładki: rt/node_modules/... (w Termuxie stage/node_modules -> dsh-test).
+- insert:
+    - id: qol
+      name: ./node_modules/dsh-qol/lib/index.js
+    - id: cross-session-memory
+      name: ./node_modules/@asherliner/dsh-memory-connect/lib/index.js
+    - id: turn-rewind
+      name: ./node_modules/@anionex/dsh-turn-rewind/lib/index.js
+    - id: reverse-skill
+      name: ./node_modules/@dhicoc/dsh-reverse-skill/lib/index.js
+    - id: dsh-patch-edit-plus
+      name: ./node_modules/dsh-patch-edit-plus/lib/index.js
+    - id: dsh-repeat-stop
+      name: ./node_modules/dsh-repeat-stop/index.js
+      config:
+        enabled: true
+        threshold: 8
+        exclude: ["job_output", "job_list", "job_kill"]
+    - id: dsh-tool-budget
+      name: ./node_modules/dsh-tool-budget/index.js
+      config:
+        enabled: true
+        maxCalls: 500
+        exclude: ["job_output", "job_list", "job_kill"]
+    - id: dsh-clock-context
+      name: ./node_modules/dsh-clock-context/lib/index.js
+      config:
+        timeZone: "Europe/Warsaw"
+        locale: "pl-PL"
+    - id: dsh-todo-continuity
+      name: ./node_modules/dsh-todo-continuity/lib/index.js
+    - id: mcp-bridge
+      name: ./node_modules/dsh-mcp-connect/plugin.js
+    - id: tts
+      name: ./node_modules/@dsh-external/dsh-plugin-tts/lib/index.mjs

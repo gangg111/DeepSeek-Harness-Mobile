@@ -1,4 +1,4 @@
-# DeepSeek Harness na Androidzie
+# DSH Mobile: DeepSeek Harness na Androidzie
 
 **DeepSeek Harness w jednej apce na telefon, bez Termuxa i roota, po polsku, z kompletem narzędzi programistycznych.**
 
@@ -101,7 +101,7 @@ Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku). 
 - Apka nie ma menedżera pakietów: pip buduje tylko czyste pakiety Pythona, npm instaluje tylko pakiety bez części natywnej.
 - Aktualizator w apce wymaga tej samej wersji `node-pty` co prekompilowana; przy innej odsyła do `update.sh` w Termuxie (tam jest kompilator).
 - Przy 30 równoległych połączeniach i bardzo długich odpowiedziach Microsoft może odrzucać część z nich; plugin ponawia fragment, a w ostateczności go pomija.
-- Rozmiar: APK ok. 600 MB, po rozpakowaniu ok. 1,5 GB.
+- Rozmiar: APK ok. 600 MB, po rozpakowaniu ok. 1,3 GB; razem z APK potrzeba ok. 2 GB wolnego miejsca.
 
 ## Licencje komponentów
 

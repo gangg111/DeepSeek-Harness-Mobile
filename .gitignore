@@ -1,0 +1,18 @@
+# generowane / duże (odtwarzane przez tools/build-tools.sh i update.sh)
+stage/*
+!stage/android-shim.cjs
+!stage/android-update.mjs
+!stage/android.patch.yml
+!stage/android-patches/
+!stage/.npmrc
+tools/root/
+tools/dl/
+tools/tt.*
+locale-pl/pkg/
+app/app/src/main/assets/payload.zip
+app/app/build/
+app/.gradle/
+app/build/
+app/local.properties
+*.log
+**/__pycache__/
