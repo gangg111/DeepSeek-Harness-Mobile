@@ -1,4 +1,4 @@
-# DSH Mobile — DeepSeek Harness na Androidzie
+# DeepSeek Harness na Androidzie
 
 **DeepSeek Harness w jednej apce na telefon, bez Termuxa i roota, po polsku, z kompletem narzędzi programistycznych.**
 
