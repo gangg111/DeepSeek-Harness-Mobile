@@ -2,6 +2,8 @@
 - insert:
     - id: locale-pl
       name: ./dsh-locale-pl/lib/index.js
+    - id: tap-outside
+      name: ./dsh-tap-outside/lib/index.js
 
 # Prompt systemowy: model ma wiedzieć, w jakim środowisku działa i jakie narzędzia ma pod ręką
 # (id-targeted patch zastępuje CAŁĄ konfigurację wpisu, więc personaPrefix jest powtórzony za dsh-web-app).

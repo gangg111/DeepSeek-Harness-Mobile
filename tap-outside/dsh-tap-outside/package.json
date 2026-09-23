@@ -1,0 +1,21 @@
+{
+  "name": "@dsh-local/tap-outside",
+  "version": "1.0.0",
+  "description": "Zamyka lewy panel boczny DSH dotknięciem poza nim na wąskim ekranie",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
+}
