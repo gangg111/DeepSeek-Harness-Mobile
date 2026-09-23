@@ -6,6 +6,13 @@
 
 ---
 
+## Zrzuty ekranu
+
+<p align="center">
+  <img src="docs/screenshots/screenshot-1.jpg" width="300" alt="Ekran startowy sesji po polsku: wybór obszaru roboczego, tryb standardowy, kompozytor" />
+  <img src="docs/screenshots/screenshot-2.jpg" width="300" alt="Panel boczny: nowa sesja, obszary robocze, ustawienia" />
+</p>
+
 ## Co to jest
 
 Apka pakuje w jeden plik APK:
