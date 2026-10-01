@@ -2,9 +2,13 @@ package com.dsh.mobile
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -14,6 +18,20 @@ import android.widget.TextView
 class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var label: TextView
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+
+    private companion object { const val REQ_FILES = 41 }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != REQ_FILES) { super.onActivityResult(requestCode, resultCode, data); return }
+        val callback = fileCallback ?: return
+        fileCallback = null
+        // Anulowanie musi oddać null, inaczej WebView nie otworzy wyboru plików ponownie.
+        val uris: Array<Uri>? = if (resultCode != RESULT_OK || data == null) null
+            else data.clipData?.let { clip -> Array(clip.itemCount) { clip.getItemAt(it).uri } } ?: data.data?.let { arrayOf(it) }
+        callback.onReceiveValue(uris)
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,7 +45,22 @@ class MainActivity : Activity() {
             settings.databaseEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             webViewClient = WebViewClient()
-            webChromeClient = WebChromeClient()
+            webChromeClient = object : WebChromeClient() {
+                // Bez tego <input type="file"> w WebView nic nie robi: załączniki i zdjęcia w kompozytorze DSH.
+                override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                    fileCallback?.onReceiveValue(null)
+                    fileCallback = callback
+                    val intent = params.createIntent().apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        if (params.mode == FileChooserParams.MODE_OPEN_MULTIPLE) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                    }
+                    return try {
+                        startActivityForResult(intent, REQ_FILES); true
+                    } catch (e: ActivityNotFoundException) {
+                        fileCallback = null; false
+                    }
+                }
+            }
             visibility = View.GONE
         }
         label = TextView(this).apply {
