@@ -1,5 +1,5 @@
 /**
- * dsh-code (serwer DSH na telefonie): lista komputerow z wtyczka dsh-remote-tailscale i ich sesji
+ * dsh-code (serwer DSH na telefonie): lista komputerow z wtyczka dsh-remote-control i ich sesji
  * dla ekranu „Code”. Zapytania do komputerow ida z tego procesu (przez Tailscale na telefonie),
  * bo przegladarka nie moze pytac komputera bezposrednio (inne pochodzenie, SameSite=Strict).
  *

@@ -1,7 +1,7 @@
 {
   "name": "@dsh-local/dsh-code",
   "version": "1.0.0",
-  "description": "Ekran „Code” w pasku bocznym: sesje DeepSeek Harness z komputerów (wtyczka dsh-remote-tailscale) przez Tailscale",
+  "description": "Ekran „Code” w pasku bocznym: sesje DeepSeek Harness z komputerów (wtyczka dsh-remote-control) przez Tailscale",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

@@ -1,5 +1,5 @@
 // dsh-code: ekran „Code” w pasku bocznym DSH na telefonie (format ladowarki modulow klienta DSH).
-// Lista komputerow z wtyczka dsh-remote-tailscale i ich sesji; dotkniecie sesji otwiera ja z komputera
+// Lista komputerow z wtyczka dsh-remote-control i ich sesji; dotkniecie sesji otwiera ja z komputera
 // (pelny interfejs DSH z historia, zalacznikami, wyborem modelu i zatrzymywaniem).
 window.__ModuleLoader__.load({
   id: '@dsh-local/dsh-code',
@@ -16,7 +16,7 @@ window.__ModuleLoader__.load({
       code: 'Code', devices: 'Devices', addDevice: 'Add device', address: 'Computer address in Tailscale', add: 'Add', cancel: 'Cancel',
       sessions: 'Sessions', all: 'All', connected: 'Connected', disconnected: 'Disconnected', newSession: 'New session',
       untitled: 'Untitled session', waiting: 'Waiting for your approval', remove: 'Remove',
-      noDevices: 'Add a computer running the dsh-remote-tailscale plugin by its Tailscale address, e.g. pc.tail1234.ts.net',
+      noDevices: 'Add a computer running the dsh-remote-control plugin by its Tailscale address, e.g. dsh-pc.tail1234.ts.net',
       noSessions: 'No sessions yet', offline: 'This computer is not reachable right now.', computer: 'Computer', workspace: 'Workspace',
       firstMessage: 'First message (optional)', create: 'Create', now: 'now', loading: 'Loading…',
     }
@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
       code: 'Code', devices: 'Urządzenia', addDevice: 'Dodaj urządzenie', address: 'Adres komputera w Tailscale', add: 'Dodaj', cancel: 'Anuluj',
       sessions: 'Sesje', all: 'Wszystkie', connected: 'Połączono', disconnected: 'Rozłączono', newSession: 'Nowa sesja',
       untitled: 'Sesja bez tytułu', waiting: 'Czeka na Twoje zatwierdzenie', remove: 'Usuń',
-      noDevices: 'Dodaj komputer z wtyczką dsh-remote-tailscale, podając jego adres z Tailscale, np. pc.tail1234.ts.net',
+      noDevices: 'Dodaj komputer z wtyczką dsh-remote-control, podając jego adres z Tailscale, np. dsh-pc.tail1234.ts.net',
       noSessions: 'Brak sesji', offline: 'Ten komputer jest teraz niedostępny.', computer: 'Komputer', workspace: 'Obszar roboczy',
       firstMessage: 'Pierwsza wiadomość (opcjonalnie)', create: 'Utwórz', now: 'teraz', loading: 'Wczytywanie…',
     }
@@ -126,7 +126,7 @@ window.__ModuleLoader__.load({
             adding ? null : h('button', { style: S.pill, onClick: () => { setAdding(true); setFormError(null) } }, h(PlusIcon), t('addDevice')),
           ),
           adding ? h('div', { style: { marginTop: 12 } },
-            h('input', { style: S.input, value: address, placeholder: 'pc.tail1234.ts.net', 'aria-label': t('address'), autoFocus: true, inputMode: 'url', autoCapitalize: 'none', autoCorrect: 'off', onChange: (e) => setAddress(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') addDevice() } }),
+            h('input', { style: S.input, value: address, placeholder: 'dsh-pc.tail1234.ts.net', 'aria-label': t('address'), autoFocus: true, inputMode: 'url', autoCapitalize: 'none', autoCorrect: 'off', onChange: (e) => setAddress(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') addDevice() } }),
             formError ? h('div', { style: S.error }, formError) : null,
             h('div', { style: { ...S.row, marginTop: 10 } },
               h('button', { style: S.pill, disabled: busy || !address.trim(), onClick: addDevice }, busy ? h(Spinner, { size: 16 }) : h(PlusIcon, { size: 16 }), t('add')),

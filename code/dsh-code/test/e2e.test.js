@@ -1,5 +1,5 @@
 // Test obu wtyczek razem: dsh-code (telefon) -> pośrednik udający `tailscale serve` (dokleja
-// Tailscale-User-Login) -> brama dsh-remote-tailscale z API na fałszywych usługach DSH (komputer).
+// Tailscale-User-Login) -> brama dsh-remote-control z API na fałszywych usługach DSH (komputer).
 // Ścieżkę do wtyczki komputera podaje DSH_REMOTE_PLUGIN; bez niej test jest pomijany.
 import test from 'node:test'
 import assert from 'node:assert/strict'
