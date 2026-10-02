@@ -15,6 +15,7 @@ const prebuilt = join(root, 'android-prebuilt');
 const upd = join(root, 'upd');
 const log = (s) => { process.stdout.write(s + '\n'); };
 function fail(msg) { log('RESULT: error ' + msg); process.exit(1); }
+const cmpVer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 const pkgVersion = (dir, name) => JSON.parse(readFileSync(join(dir, 'node_modules', name, 'package.json'), 'utf8')).version;
 
 const npmEnv = { ...process.env, npm_config_cache: join(home, '.npm'), npm_config_update_notifier: 'false', npm_config_fund: 'false', npm_config_audit: 'false', npm_config_loglevel: 'error', npm_config_progress: 'false' };
@@ -43,7 +44,23 @@ try {
   log('sharp → WebAssembly…');
   npm(upd, 'install', '--ignore-scripts', '--force', '--cpu=wasm32', `@img/sharp-wasm32@${pkgVersion(upd, 'sharp')}`);
   log('koffi android-arm64…');
-  npm(upd, 'install', '--ignore-scripts', '--force', `@koromix/koffi-android-arm64@${pkgVersion(upd, 'koffi')}`);
+  // Nie każda wersja koffi ma binarkę android-arm64 (np. dsh-fs-local 0.2.0 przypina koffi 3.1.1, a @koromix/koffi-android-arm64
+  // zaczyna się od 3.2.1). Wtedy wymuszamy przez overrides najnowszą wersję tej samej linii głównej, która binarkę ma.
+  let koffiVer = pkgVersion(upd, 'koffi');
+  const androidKoffi = JSON.parse(npm(upd, 'view', '@koromix/koffi-android-arm64', 'versions', '--json'));
+  if (!androidKoffi.includes(koffiVer)) {
+    const major = koffiVer.split('.')[0];
+    const pick = androidKoffi.filter((v) => v.startsWith(major + '.') && !v.includes('-')).sort((a, b) => cmpVer(a, b)).pop();
+    if (!pick) fail(`koffi ${koffiVer} nie ma binarki android-arm64 (dostępne: ${androidKoffi.join(', ')}) — uruchom update.sh w Termuxie`);
+    log(`koffi ${koffiVer} nie ma binarki android-arm64 → overrides koffi@${pick}`);
+    const pj = JSON.parse(readFileSync(join(upd, 'package.json'), 'utf8'));
+    pj.overrides = { ...(pj.overrides ?? {}), koffi: pick };
+    writeFileSync(join(upd, 'package.json'), JSON.stringify(pj, null, 2) + '\n');
+    npm(upd, 'install', '--ignore-scripts', '--force');
+    koffiVer = pkgVersion(upd, 'koffi');
+    if (koffiVer !== pick) fail(`overrides koffi nie zadziałało (jest ${koffiVer}, chciano ${pick})`);
+  }
+  npm(upd, 'install', '--ignore-scripts', '--force', `@koromix/koffi-android-arm64@${koffiVer}`);
 
   log('node-pty z prekompilowanego pliku…');
   const ptyVer = pkgVersion(upd, 'node-pty');
@@ -66,6 +83,13 @@ try {
   if (!patched.includes("platform !== 'android'")) fail('nie znaleziono miejsca do załatania w flock.js (zmiana upstream) — uruchom update.sh w Termuxie');
   writeFileSync(flockJs, patched);
 
+  // node-addon-require-builtin (dsh >= 0.2.0) nie ma wariantu android-arm64: podstawiamy pakiet JS działający pod --expose-internals.
+  if (existsSync(join(upd, 'node_modules/node-addon-require-builtin'))) {
+    log('node-addon-require-builtin: pakiet android-arm64 z zamiennika JS…');
+    const rb = join(upd, 'node_modules/node-addon-require-builtin-android-arm64'); mkdirSync(rb, { recursive: true });
+    cpSync(join(prebuilt, 'require-builtin-shim.js'), join(rb, 'index.js'));
+    writeFileSync(join(rb, 'package.json'), JSON.stringify({ name: 'node-addon-require-builtin-android-arm64', version: pkgVersion(upd, 'node-addon-require-builtin'), main: './index.js', os: ['android'], cpu: ['arm64'], license: 'MIT' }, null, 2) + '\n');
+  }
   log('łatki na pluginy…');
   for (const f of (existsSync(join(root, 'android-patches')) ? readdirSync(join(root, 'android-patches')) : []).filter(n => n.endsWith('.mjs'))) {
     const r = spawnSync(node, [join(root, 'android-patches', f), join(upd, 'node_modules')], { encoding: 'utf8' });

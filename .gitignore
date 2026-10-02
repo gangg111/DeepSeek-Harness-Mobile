@@ -2,6 +2,10 @@
 stage/*
 !stage/android-shim.cjs
 !stage/android-update.mjs
+!stage/android-prebuilt/
+!stage/android-prebuilt/require-builtin-shim.js
+stage/android-prebuilt/*
+!stage/android-prebuilt/require-builtin-shim.js
 !stage/android.patch.yml
 !stage/android-patches/
 !stage/.npmrc

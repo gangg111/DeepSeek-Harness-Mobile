@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import java.io.File
 
 /**
  * Usługa pierwszoplanowa trzymająca proces node z serwerem dsh, żeby Android nie ubijał go,
@@ -101,10 +102,15 @@ class ServerService : Service() {
                 App.process?.destroyForcibly(); App.url = null
                 Thread.sleep(1500)
                 val result = app.runUpdater(listOf("--tag", "latest")) { line -> update("Aktualizacja: $line") }
+                val failedFile = File(app.filesDir, "home/.update-failed")
                 val msg = when {
-                    result.startsWith("ok ") -> "Zaktualizowano dsh do ${result.removePrefix("ok ")}"
-                    result.startsWith("uptodate ") -> "dsh ${result.removePrefix("uptodate ")} jest aktualny"
-                    else -> "Aktualizacja nie powiodła się: ${result.removePrefix("error ")}"
+                    result.startsWith("ok ") -> { failedFile.delete(); "Zaktualizowano dsh do ${result.removePrefix("ok ")}" }
+                    result.startsWith("uptodate ") -> { failedFile.delete(); "dsh ${result.removePrefix("uptodate ")} jest aktualny" }
+                    else -> {
+                        // Zapamiętaj, żeby po restarcie nie proponować w kółko tej samej wersji bez słowa wyjaśnienia.
+                        try { failedFile.writeText("${availableVersion ?: "?"}\n${result.removePrefix("error ")}") } catch (_: Throwable) {}
+                        "Aktualizacja nie powiodła się: ${result.removePrefix("error ")}"
+                    }
                 }
                 availableVersion = null
                 app.log(msg); update(msg); App.lastUpdateMessage = msg
@@ -119,7 +125,13 @@ class ServerService : Service() {
             try {
                 val app = application as App
                 val r = app.runUpdater(listOf("--tag", "latest", "--check")) {}
-                if (r.startsWith("available ")) { availableVersion = r.removePrefix("available "); update("Dostępna aktualizacja dsh ${availableVersion}. Otwórz powiadomienie → Aktualizuj.") }
+                if (r.startsWith("available ")) {
+                    availableVersion = r.removePrefix("available ")
+                    val failed = try { File(app.filesDir, "home/.update-failed").readText().split("\n", limit = 2) } catch (_: Throwable) { null }
+                    if (failed != null && failed.size == 2 && failed[0] == availableVersion)
+                        update("Aktualizacja dsh $availableVersion nie powiodła się ostatnio: ${failed[1].take(200)}. „Aktualizuj” spróbuje ponownie; w ostateczności update.sh w Termuxie.")
+                    else update("Dostępna aktualizacja dsh ${availableVersion}. Otwórz powiadomienie → Aktualizuj.")
+                }
             } catch (_: Throwable) {}
         }.start()
     }

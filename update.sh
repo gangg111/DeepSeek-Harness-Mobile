@@ -35,7 +35,22 @@ step_native() {
   log "sharp -> wariant WebAssembly (brak binarki android-arm64)"
   npm install --ignore-scripts --force --cpu=wasm32 "@img/sharp-wasm32@$(ver sharp)"
   log "koffi android-arm64 (--cpu=wasm32 wyżej wycina ten pakiet)"
-  npm install --ignore-scripts --force "@koromix/koffi-android-arm64@$(ver koffi)"
+  # Nie każda wersja koffi ma binarkę android-arm64 (dsh-fs-local 0.2.0 przypina 3.1.1, a @koromix/koffi-android-arm64 zaczyna się
+  # od 3.2.1): wtedy overrides w package.json na najnowszą wersję tej samej linii głównej, która binarkę ma (tak samo robi android-update.mjs).
+  local kv pick; kv=$(ver koffi)
+  pick=$(npm view @koromix/koffi-android-arm64 versions --json | node -e '
+    const a=JSON.parse(require("fs").readFileSync(0,"utf8")), kv=process.argv[1], M=kv.split(".")[0];
+    if (a.includes(kv)) { console.log(kv); process.exit(); }
+    const c=a.filter(v=>v.startsWith(M+".")&&!v.includes("-")).sort((x,y)=>{const p=x.split(".").map(Number),q=y.split(".").map(Number);for(let i=0;i<3;i++)if(p[i]!==q[i])return p[i]-q[i];return 0});
+    console.log(c.pop()||"")' "$kv")
+  [ -n "$pick" ] || { echo "BŁĄD: koffi $kv bez binarki android-arm64 i brak zamiennika w tej linii głównej"; exit 1; }
+  if [ "$pick" != "$kv" ]; then
+    log "koffi $kv nie ma binarki android-arm64 -> overrides koffi@$pick"
+    node -e 'const f="package.json",p=JSON.parse(require("fs").readFileSync(f,"utf8"));p.overrides={...(p.overrides||{}),koffi:process.argv[1]};require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\n")' "$pick"
+    npm install --ignore-scripts --force
+    [ "$(ver koffi)" = "$pick" ] || { echo "BŁĄD: overrides koffi nie zadziałało ($(ver koffi))"; exit 1; }
+  fi
+  npm install --ignore-scripts --force "@koromix/koffi-android-arm64@$pick"
   log "node-pty: build natywny (common.gypi wymaga android_ndk_path)"
   (cd node_modules/node-pty && node "$NODE_GYP" rebuild -- -Dandroid_ndk_path= >/dev/null && node scripts/post-install.js >/dev/null)
   test -f node_modules/node-pty/build/Release/pty.node
@@ -46,6 +61,12 @@ step_native() {
   printf '{ "name": "@deepseek-ai/node-addon-system-android-arm64", "version": "%s", "os": ["android"], "cpu": ["arm64"], "license": "BSD-3-Clause" }\n' "$(ver @deepseek-ai/node-addon-system)" > "$dst/package.json"
   sed -i "s/if (platform !== 'linux' \&\& platform !== 'darwin') {/if (platform !== 'linux' \&\& platform !== 'darwin' \&\& platform !== 'android') {/" "$nas/lib/flock.js"
   grep -q "platform !== 'android'" "$nas/lib/flock.js"
+  if [ -d node_modules/node-addon-require-builtin ]; then
+    log "node-addon-require-builtin: pakiet android-arm64 z zamiennika JS (--expose-internals)"
+    local rb=node_modules/node-addon-require-builtin-android-arm64; mkdir -p "$rb"
+    cp "$STAGE/android-prebuilt/require-builtin-shim.js" "$rb/index.js"
+    printf '{ "name": "node-addon-require-builtin-android-arm64", "version": "%s", "main": "./index.js", "os": ["android"], "cpu": ["arm64"], "license": "MIT" }\n' "$(ver node-addon-require-builtin)" > "$rb/package.json"
+  fi
   log "łatki na pluginy (stage/android-patches/*.mjs)"
   for f in "$STAGE"/android-patches/*.mjs; do [ -e "$f" ] && node "$f" "$DSH/node_modules"; done
   log "postinstall pozostałych pakietów"
