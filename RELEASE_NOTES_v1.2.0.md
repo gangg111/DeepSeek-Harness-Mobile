@@ -1,6 +1,6 @@
 # DSH Mobile 1.2.0
 
-**DeepSeek Harness 0.2.0-rc.2 · versionCode 23 · payload 20 · arm64 · ok. 620 MB**
+**DeepSeek Harness 0.2.0-rc.2 · versionCode 24 · payload 21 · arm64 · ok. 620 MB**
 
 *English summary: DeepSeek Harness upgraded from 0.1.5-rc.3 to **0.2.0-rc.2** (plugin manager, automation tasks, voice input, sidebar terminal and browser, Office/Excel previews, agent teams, keyboard shortcuts…). The Polish language pack now covers all **2446 strings** (1369 new). Two Android-specific fixes make 0.2.0 run on the phone: `koffi` pinned by dsh has no android-arm64 binary (resolved with an `overrides` to the newest 3.x that has one) and the new native `node-addon-require-builtin` has no Android variant (replaced by a JS package working under `--expose-internals`). The in-app updater applies both automatically and remembers a failed update instead of offering the same version again. Two community plugins (`dsh-memory-connect`, `dsh-reverse-skill`) are disabled by dsh 0.2.0 itself as incompatible.*
 
@@ -13,6 +13,7 @@
   - nowy natywny `node-addon-require-builtin` nie ma wariantu android-arm64 ani źródeł; podstawiamy pakiet JS `node-addon-require-builtin-android-arm64`, który pod `--expose-internals` zwraca wewnętrzne moduły zwykłym `require()` (kształt zgodny z walidacją loadera, napi-v9).
   - npm po aktualizacji 0.1.5→0.2.0 zagnieżdża pakiety `@deepseek-ai/*` pod `@deepseek-ai/dsh/node_modules`, przez co pluginy społeczności (np. `dsh-patch-edit-plus`) nie znajdowały `@deepseek-ai/dsh-tools`; skrypt `android-hoist.mjs` dowiązuje brakujące pakiety na górze (symlinki = ta sama instancja modułu co w dsh), w APK odtwarzane z `links.txt` po rozpakowaniu.
   - `dsh-mcp-connect` deklarował wyniki narzędzi jako `type: 'json'`, czego ścisły walidator 0.2.0 nie zna; łatka `mcp-schema-020.mjs` zamienia je na `object/additionalProperties` (plugin znów wstaje).
+  - moduł kliencki `dsh-turn-rewind` deklarował zależność od serwisu `settingsScope`, którego żaden plugin kliencki 0.2.0 nie dostarcza, więc czekał w nieskończoność („Failed to load plugins … waiting for service: settingsScope”); łatka `rewind-inject-020.mjs` usuwa go z `inject` i czyta opcjonalnie przez `ctx.get()`.
 - **Aktualizator w apce** stosuje wszystkie powyższe obejścia sam. Gdy kolejna wersja dsh wprowadzi zmiany wymagające ręcznej przebudowy i aktualizacja padnie, powiadomienie mówi wprost, że trzeba pobrać nową wersję apki, z przyciskiem „Pobierz APK” prowadzącym do https://github.com/gangg111/DeepSeek-Harness-Mobile/releases; nieudana wersja jest zapamiętana, więc po restarcie komunikat zostaje (zamiast ponownej propozycji tej samej aktualizacji).
 
 ## Zmiany względem 1.1.0 w ekranie Code
@@ -36,4 +37,4 @@ Aktualizacja z 1.1.0 bez odinstalowania (ten sam klucz). Pierwszy start rozpakow
 
 ## Sumy kontrolne
 
-`dsh-mobile.apk` — md5 `d7a0b35f5544935067a62ecc0fbae86e` (plik `dsh-mobile.apk.md5`).
+`dsh-mobile.apk` — md5 `6417c0e60c93997555cf4e8564003676` (plik `dsh-mobile.apk.md5`).
