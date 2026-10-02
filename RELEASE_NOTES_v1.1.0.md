@@ -2,7 +2,7 @@
 
 **DeepSeek Harness 0.1.5-rc.3 · versionCode 21 · payload 18 · arm64 · ok. 620 MB**
 
-*English summary: the new **Code** screen lists DeepSeek Harness sessions running on your computers and opens them on the phone with full history, attachments and model selection. Connectivity is provided by a **built-in Tailscale node** (Go, `tsnet`) inside the app: no Tailscale app, no Android VPN. Computers running the `dsh-remote-control` plugin are **discovered automatically** on the tailnet. All traffic between the WebView and the computer goes through a local loopback proxy guarded by a per-launch secret.*
+*English summary: the new **Code** screen lists DeepSeek Harness sessions running on your computers and opens them on the phone with full history, attachments and model selection. Connectivity is provided by a **built-in Tailscale node** (Go, `tsnet`) inside the app: no Tailscale app, no Android VPN. Computers running the [`dsh-remote-control`](https://github.com/gangg111/dsh-remote-control) plugin are **discovered automatically** on the tailnet. All traffic between the WebView and the computer goes through a local loopback proxy guarded by a per-launch secret.*
 
 ## Co nowego
 
@@ -20,7 +20,7 @@ Oficjalny `tailscaled` nie startuje w apce ani w Termuxie: SELinux Androida odma
 
 ## Wymagania po stronie komputera
 
-- DeepSeek Harness z wtyczką `dsh-remote-control` (brama wpuszcza tylko Twoje konto Tailscale).
+- DeepSeek Harness z wtyczką [`dsh-remote-control`](https://github.com/gangg111/dsh-remote-control) (brama wpuszcza tylko Twoje konto Tailscale).
 - W panelu tailnetu włączone **HTTPS Certificates** (DNS → HTTPS Certificates). Bez tego każde połączenie kończy się `tls: internal error`. Pierwszy uścisk po włączeniu może trwać do minuty (certyfikat Let's Encrypt).
 
 ## Instalacja
