@@ -11,7 +11,7 @@ import java.util.zip.ZipInputStream
 class App : Application() {
     companion object {
         const val TAG = "dsh"
-        const val PAYLOAD_VERSION = "11"
+        const val PAYLOAD_VERSION = "16"
         @Volatile var url: String? = null
         @Volatile var status: String = "start"
         @Volatile var process: Process? = null
@@ -26,6 +26,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         try { logFile.writeText("--- start ${java.util.Date()}\n") } catch (_: Throwable) {}
+        try { val pi = packageManager.getPackageInfo(packageName, 0); log("build: versionName ${pi.versionName}, versionCode ${pi.longVersionCode}, payload $PAYLOAD_VERSION") } catch (_: Throwable) {}
         ServerService.start(this)
     }
 

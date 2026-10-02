@@ -19,6 +19,9 @@ window.__ModuleLoader__.load({
       noDevices: 'Add a computer running the dsh-remote-control plugin by its Tailscale address, e.g. dsh-pc.tail1234.ts.net',
       noSessions: 'No sessions yet', offline: 'This computer is not reachable right now.', computer: 'Computer', workspace: 'Workspace',
       firstMessage: 'First message (optional)', create: 'Create', now: 'now', loading: 'Loading…',
+      tailscale: 'Tailscale', tsRunning: 'built-in node signed in', tsNeedsLogin: 'built-in node needs sign-in', tsLogin: 'Sign in to Tailscale',
+      tsStarting: 'built-in node starting…', tsVpn: 'via Tailscale app (VPN)', tsStopped: 'built-in node not running',
+      searching: 'Looking for computers on the Tailscale network…',
     }
     const pl = {
       code: 'Code', devices: 'Urządzenia', addDevice: 'Dodaj urządzenie', address: 'Adres komputera w Tailscale', add: 'Dodaj', cancel: 'Anuluj',
@@ -27,6 +30,9 @@ window.__ModuleLoader__.load({
       noDevices: 'Dodaj komputer z wtyczką dsh-remote-control, podając jego adres z Tailscale, np. dsh-pc.tail1234.ts.net',
       noSessions: 'Brak sesji', offline: 'Ten komputer jest teraz niedostępny.', computer: 'Komputer', workspace: 'Obszar roboczy',
       firstMessage: 'Pierwsza wiadomość (opcjonalnie)', create: 'Utwórz', now: 'teraz', loading: 'Wczytywanie…',
+      tailscale: 'Tailscale', tsRunning: 'wbudowany węzeł zalogowany', tsNeedsLogin: 'wbudowany węzeł wymaga logowania', tsLogin: 'Zaloguj Tailscale',
+      tsStarting: 'wbudowany węzeł startuje…', tsVpn: 'przez apkę Tailscale (VPN)', tsStopped: 'wbudowany węzeł nie działa',
+      searching: 'Szukam komputerów w sieci Tailscale…',
     }
 
     // Ikony SVG w kolorze tekstu (bez emoji).
@@ -108,14 +114,22 @@ window.__ModuleLoader__.load({
           try { setData(await api('/devices', { method: 'POST', body: JSON.stringify({ url: address }) })); setAdding(false); setAddress('') } catch (e) { setFormError(e.message) } finally { setBusy(false) }
         }
         const removeDevice = async (id) => { try { setData(await api(`/devices/${encodeURIComponent(id)}`, { method: 'DELETE' })) } catch (e) { setError(e.message) } }
-        const open = (s) => { if (!s.connected) { setError(t('offline')); return } window.location.href = `${s.deviceUrl}?dshOpen=${encodeURIComponent(s.sessionId)}` }
+        // openUrl z serwera: przez lokalny pośrednik wbudowanego węzła (http://127.0.0.1:<port>/?dshrk=…) albo wprost https://<pc> (VPN).
+        const open = (s) => { if (!s.connected) { setError(t('offline')); return } window.location.href = s.openUrl || `${s.deviceUrl}?dshOpen=${encodeURIComponent(s.sessionId)}` }
 
         const devices = data ? data.devices : []
         const sessions = data ? data.sessions.filter((s) => filter === 'all' || s.deviceId === filter) : []
         const online = devices.filter((d) => d.connected)
 
+        const ts = data ? data.tailscale : null
+        const tsText = !ts ? '' : ts.via === 'tsnet' ? t('tsRunning') : ts.backendState === 'NeedsLogin' ? t('tsNeedsLogin') : ts.backendState === 'Starting' ? t('tsStarting') : ts.backendState === 'Unavailable' ? t('tsVpn') : ts.backendState === 'Stopped' ? t('tsStopped') : `${t('tsVpn')} (${ts.backendState})`
         return h('div', { style: S.page },
           h('div', { style: S.title }, t('code')),
+          ts ? h('div', { style: { ...S.status, justifyContent: 'center', opacity: 0.8, marginBottom: 8, flexWrap: 'wrap', whiteSpace: 'normal' } },
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, color: ts.via === 'tsnet' ? GREEN : 'inherit' } }, h(LaptopIcon, { off: ts.via !== 'tsnet' }), `${t('tailscale')}: ${tsText}`),
+            ts.authURL ? h('a', { href: ts.authURL, target: '_blank', rel: 'noopener', style: { ...S.pill, padding: '6px 12px', textDecoration: 'none' } }, t('tsLogin')) : null,
+            ts.error && ts.backendState !== 'NeedsLogin' ? h('span', { style: { opacity: 0.6 } }, ts.error) : null,
+          ) : null,
           h('div', { style: S.section }, h('span', null, t('devices'))),
           h('div', { style: S.row },
             ...devices.map((d) => h('span', { key: d.id, style: S.pill, title: d.error || d.url },
@@ -140,6 +154,7 @@ window.__ModuleLoader__.load({
           ),
           error ? h('div', { style: { ...S.error, margin: '0 4px 12px' } }, error) : null,
           !data ? h('div', { style: S.empty }, t('loading'))
+            : devices.length === 0 && data.discovering ? h('div', { style: { ...S.empty, display: 'flex', alignItems: 'center', gap: 10 } }, h(Spinner, { size: 18 }), t('searching'))
             : devices.length === 0 ? h('div', { style: S.empty }, t('noDevices'))
               : sessions.length === 0 ? h('div', { style: S.empty }, t('noSessions'))
                 : sessions.map((s) => h('div', { key: `${s.deviceId}/${s.sessionId}`, role: 'button', tabIndex: 0, style: { ...S.card, opacity: s.connected ? 1 : 0.75 }, onClick: () => open(s), onKeyDown: (e) => { if (e.key === 'Enter') open(s) } },

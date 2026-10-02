@@ -88,6 +88,9 @@ step_stage() {
   rm -rf "$STAGE/dsh-locale-pl"; cp -r "$ROOT/locale-pl/pkg/dsh-locale-pl" "$STAGE/dsh-locale-pl"; cp "$ROOT/locale-pl/android.patch.yml" "$STAGE/android.patch.yml"
   rm -rf "$STAGE/dsh-tap-outside"; cp -r "$ROOT/tap-outside/dsh-tap-outside" "$STAGE/dsh-tap-outside"   # zamykanie panelu dotknięciem obok
   rm -rf "$STAGE/dsh-code"; cp -r "$ROOT/code/dsh-code" "$STAGE/dsh-code"   # ekran Code: sesje z komputerów przez Tailscale
+  log "wbudowany węzeł Tailscale (tsnet, Go natywnie GOOS=android) -> stage/bin/dsh-tsnet-mobile"
+  command -v go >/dev/null || { echo "BŁĄD: brak go (pkg install golang)"; exit 1; }
+  (cd "$ROOT/tsnet" && go vet ./... && go test ./... >/dev/null && go build -trimpath -ldflags='-s -w' -o "$STAGE/bin/dsh-tsnet-mobile" .)
   # Raport: klucze, które nowe dsh dodało, a pl.json ich nie ma (pokażą się po angielsku) — do ręcznego dotłumaczenia.
   (cd "$ROOT/locale-pl" && node extract-en.mjs "$DSH/node_modules/@deepseek-ai" en.json >/dev/null && node -e '
     const en=require("./en.json"), pl=require("./pl.json"); const miss=[];

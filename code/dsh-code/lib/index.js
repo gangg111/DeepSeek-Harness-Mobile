@@ -3,15 +3,22 @@
  * dla ekranu „Code”. Zapytania do komputerow ida z tego procesu (przez Tailscale na telefonie),
  * bo przegladarka nie moze pytac komputera bezposrednio (inne pochodzenie, SameSite=Strict).
  *
- * Trasy pod /api/dsh-code wymagaja tej samej sesji co interfejs DSH (ctx.connection.admit),
+ * Trasy pod /api/dsh-code wymagaja tej samej sesji co interfejs DSH (ctx.connection.requestRejection),
  * wiec inne aplikacje na telefonie nie moga przez nie sterowac komputerem.
  * Dane: $DSH_HOME/dsh-code.json (urzadzenia + ostatnio widziane sesje, pokazywane jako Rozlaczone).
+ *
+ * Dwie drogi do komputera: (a) wbudowany wezel Tailscale (program dsh-tsnet-mobile, lib/tsnet.js) — zapytania
+ * i WebView ida przez lokalny posrednik 127.0.0.1:<staly port urzadzenia>, bez apki Tailscale/VPN; (b) gdy wezel
+ * nie dziala albo nie jest zalogowany — bezposrednio https://<pc> (wymaga apki Tailscale z VPN, jak dotychczas).
  */
 
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+
+import { openUrl, startTsnet, tsnetBinaryPath } from './tsnet.js'
+import { MAX_PARALLEL, acceptProbe, hostOf, planProbes, runLimited } from './discover.js'
 
 export const name = 'dsh-code'
 export const inject = ['webServer', 'connection']
@@ -25,11 +32,60 @@ export function apply(ctx) {
   const file = join(home, 'dsh-code.json')
   let data = load()
 
+  const bin = tsnetBinaryPath()
+  const tsnet = bin ? startTsnet({ bin, dir: join(home, 'tsnet'), hostname: process.env.DSH_TSNET_HOSTNAME || 'dsh-mobile', log: (l) => console.log(`[dsh-code] ${l}`), onPeers: (peers) => { discover(peers).catch((e) => console.log(`[dsh-code] wykrywanie: ${e.message}`)) } }) : null
+
+  // Wykrywanie komputerów: patrz lib/discover.js. `probed` = ostatni sondowany stan online per host (ponawiamy
+  // tylko po zmianie); `inFlight` dla ekranu („Szukam komputerów…”).
+  const probed = new Map()
+  let inFlight = 0, peersSeen = false
+  async function discover(peers) {
+    peersSeen = true
+    const due = planProbes(peers, data.devices, data.ignored, probed)
+    if (!due.length) return
+    inFlight += due.length
+    try {
+      await runLimited(due, MAX_PARALLEL, async (host) => {
+        const online = peers.find((p) => String(p.DNSName).toLowerCase() === host)?.Online ?? true
+        probed.set(host, { online })
+        let r
+        try { r = await tsnet.probe(host) } catch (e) { r = { target: host, error: e.message } }
+        const name = acceptProbe(r)
+        console.log(`[dsh-code] sonda ${host}: ${r.error ? `błąd ${r.error}` : `HTTP ${r.status} ${JSON.stringify(r.body ?? null)}`}${name ? ` -> dodaję „${name}”` : ''}`)
+        if (!name) return
+        const url = `https://${host}/`
+        if (data.devices.some((d) => hostOf(d.url) === host) || data.ignored.includes(host)) return
+        data.devices.push({ id: randomUUID(), name, url, auto: true })
+        save()
+      })
+    } finally { inFlight -= due.length }
+  }
+  /** Czy trwa szukanie (dla pustej listy): węzeł działa i albo jeszcze nie ma listy urządzeń, albo sondy w toku. */
+  const discovering = () => !!tsnet && tsnet.running() && (!peersSeen || inFlight > 0)
+  if (!bin) console.log('[dsh-code] brak programu dsh-tsnet-mobile — tylko droga przez apkę Tailscale (VPN)')
+  ctx.effect(() => () => tsnet?.stop(), 'dsh-code: tsnet stop')
+
+  /** Czy do komputera idziemy przez wbudowany węzeł (zalogowany) — inaczej bezpośrednio (VPN). */
+  const viaTsnet = () => !!tsnet && tsnet.running()
+
+  /** Lokalny pośrednik dla urządzenia (stały port zapisany w dsh-code.json); zwraca origin http://127.0.0.1:<port>. */
+  async function proxyOrigin(d) {
+    const r = await tsnet.ensureProxy(new URL(d.url).host, d.port ?? 0)
+    if (r.port !== d.port) { d.port = r.port; try { save() } catch {} }
+    return r.origin
+  }
+
+  /** Adres, pod którym WebView ma otworzyć sesję na komputerze. */
+  async function sessionOpenUrl(d, sessionId) {
+    if (viaTsnet()) return openUrl(await proxyOrigin(d), tsnet.secret, sessionId)
+    return `${d.url}?dshOpen=${encodeURIComponent(sessionId)}`
+  }
+
   function load() {
     try {
       const d = JSON.parse(readFileSync(file, 'utf8'))
-      return { devices: Array.isArray(d.devices) ? d.devices : [], cache: d.cache && typeof d.cache === 'object' ? d.cache : {} }
-    } catch { return { devices: [], cache: {} } }
+      return { devices: Array.isArray(d.devices) ? d.devices : [], cache: d.cache && typeof d.cache === 'object' ? d.cache : {}, ignored: Array.isArray(d.ignored) ? d.ignored : [] }
+    } catch { return { devices: [], cache: {}, ignored: [] } }
   }
   function save() {
     mkdirSync(home, { recursive: true })
@@ -39,9 +95,14 @@ export function apply(ctx) {
   }
 
   async function remote(device, path, init = {}) {
-    const res = await fetch(new URL(`__remote/api${path}`, device.url), { ...init, signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS), headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } })
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
+    let base = device.url, extra = {}
+    if (viaTsnet() && device.id) { base = (await proxyOrigin(device)) + '/'; extra = tsnet.headers() }
+    else if (viaTsnet()) { const r = await tsnet.ensureProxy(new URL(device.url).host, 0); base = r.origin + '/'; extra = tsnet.headers() }   // nowe urządzenie (bez id) — port tymczasowy
+    const res = await fetch(new URL(`__remote/api${path}`, base), { ...init, signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS), headers: { 'content-type': 'application/json', ...extra, ...(init.headers ?? {}) } })
+    const text = await res.text()
+    let body = {}
+    try { body = JSON.parse(text) } catch {}
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}${text && !text.startsWith('<') ? `: ${text.trim().slice(0, 200)}` : ''}`)
     return body
   }
 
@@ -56,25 +117,42 @@ export function apply(ctx) {
       }
     }))
     try { save() } catch {}
-    const sessions = results.flatMap(({ device, sessions: list }) => list.map((s) => ({ ...s, deviceId: device.id, deviceName: device.name, deviceUrl: device.url, connected: device.connected })))
+    const sessions = []
+    for (const { device, sessions: list } of results) {
+      for (const s of list) {
+        let open = null
+        if (device.connected) { try { open = await sessionOpenUrl(device, s.sessionId) } catch {} }
+        sessions.push({ ...s, deviceId: device.id, deviceName: device.name, deviceUrl: device.url, connected: device.connected, openUrl: open })
+      }
+    }
     sessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    return { devices: results.map((r) => r.device), sessions }
+    const ts = tsnet ? tsnet.state() : null
+    return {
+      devices: results.map((r) => r.device),
+      discovering: discovering(),
+      sessions,
+      tailscale: ts ? { backendState: ts.BackendState ?? '', authURL: ts.AuthURL ?? null, error: ts.Error ?? null, ips: ts.TailscaleIPs ?? [], via: viaTsnet() ? 'tsnet' : 'vpn' } : { backendState: 'Unavailable', via: 'vpn' },
+    }
   }
 
   async function addDevice(body) {
     const url = normalizeUrl(body.url)
     if (data.devices.some((d) => d.url === url)) throw Object.assign(new Error('To urządzenie jest już dodane.'), { status: 409 })
     let info
-    try { info = await remote({ url }, '/info') } catch (error) {
+    // Dłuższy limit: pierwszy uścisk TLS z komputerem może czekać na certyfikat Let's Encrypt (do ~60 s).
+    try { info = await remote({ url }, '/info', { timeoutMs: 75000 }) } catch (error) {
       throw Object.assign(new Error(`Nie mogę połączyć się z ${url}: ${describe(error)}`), { status: 502 })
     }
+    data.ignored = data.ignored.filter((h) => h !== hostOf(url))   // dodane ręcznie z powrotem = znów wolno wykrywać
     data.devices.push({ id: randomUUID(), name: info.name || new URL(url).hostname.split('.')[0], url })
     save()
     return state()
   }
 
   function removeDevice(id) {
-    data.devices = data.devices.filter((d) => d.id !== id)
+    const d = data.devices.find((x) => x.id === id)
+    if (d && !data.ignored.includes(hostOf(d.url))) data.ignored.push(hostOf(d.url))   // usunięte ręcznie: nie dodawać automatycznie
+    data.devices = data.devices.filter((x) => x.id !== id)
     delete data.cache[id]
     save()
     return state()
@@ -90,8 +168,9 @@ export function apply(ctx) {
     kind: 'prefix',
     path: PREFIX,
     handler: async (req, res) => {
-      const admission = ctx.connection.admit(req)
-      if ('rejection' in admission) return send(res, admission.rejection, { error: 'unauthorized' })
+      // Ta sama sesja co interfejs DSH: 403 = obce pochodzenie/host, 401 = brak ważnego ciasteczka.
+      const rejection = ctx.connection.requestRejection(req)
+      if (rejection !== undefined) return send(res, rejection, { error: rejection === 401 ? 'unauthorized' : 'forbidden' })
       const url = new URL(req.url ?? '/', 'http://local')
       const route = `${req.method} ${url.pathname.slice(PREFIX.length)}`
       try {
@@ -103,7 +182,7 @@ export function apply(ctx) {
           const body = await readJson(req)
           const d = device(body.device)
           const created = await remote(d, '/sessions', { method: 'POST', body: JSON.stringify({ workspaceId: body.workspaceId, text: body.text }), timeoutMs: 30000 })
-          return send(res, 200, { ...created, openUrl: `${d.url}?dshOpen=${encodeURIComponent(created.sessionId)}` })
+          return send(res, 200, { ...created, openUrl: await sessionOpenUrl(d, created.sessionId) })
         }
         return send(res, 404, { error: 'nieznana ścieżka' })
       } catch (error) {

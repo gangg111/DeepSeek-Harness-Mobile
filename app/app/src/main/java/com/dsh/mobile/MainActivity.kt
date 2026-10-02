@@ -11,6 +11,7 @@ import android.view.View
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
+import android.webkit.WebResourceRequest
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -44,7 +45,16 @@ class MainActivity : Activity() {
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
-            webViewClient = WebViewClient()
+            // Logowanie do Tailscale (konto Google/GitHub) ma iść w prawdziwej przeglądarce; reszta zostaje w WebView
+            // (także https://<pc>.ts.net przez VPN i http://127.0.0.1:<port> przez wbudowany węzeł).
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    if (request.url.host == "login.tailscale.com") {
+                        startActivity(Intent(Intent.ACTION_VIEW, request.url)); return true
+                    }
+                    return false
+                }
+            }
             webChromeClient = object : WebChromeClient() {
                 // Bez tego <input type="file"> w WebView nic nie robi: załączniki i zdjęcia w kompozytorze DSH.
                 override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
