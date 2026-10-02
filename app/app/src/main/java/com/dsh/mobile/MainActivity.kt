@@ -26,8 +26,11 @@ class MainActivity : Activity() {
 
     private companion object {
         const val REQ_FILES = 41
-        /** Powiększenie strony dsh w WebView: na telefonie ikony i tekst interfejsu są za małe (user, 2026-10-02). CSS `zoom`
-         *  skaluje wszystko (także ikony) i zmniejsza szerokość w px CSS, więc układ mobilny (próg 768 px) obejmuje też rozłożony Fold. */
+        /** Powiększenie strony dsh w WebView: na telefonie ikony i tekst interfejsu są za małe (user, 2026-10-02).
+         *  Realizowane przez meta viewport (width = szerokość ekranu / UI_ZOOM, initial-scale = UI_ZOOM), czyli natywne
+         *  skalowanie strony: wszystko większe (także ikony), mniejsza szerokość w px CSS (układ mobilny także na rozłożonym
+         *  Foldzie), a wyskakujące menu pozycjonują się poprawnie. CSS `zoom` na html rozjeżdżał floating-ui: lista trybów
+         *  dostępu w sesji z komputera wychodziła za dół ekranu. */
         const val UI_ZOOM = "1.2"
     }
 
@@ -53,6 +56,9 @@ class MainActivity : Activity() {
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            // Honoruj meta viewport ustawiane przez applyZoom() (szerokość strony mniejsza niż ekran = natywne powiększenie).
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
             // Logowanie do Tailscale (konto Google/GitHub) ma iść w prawdziwej przeglądarce; reszta zostaje w WebView
             // (także https://<pc>.ts.net przez VPN i http://127.0.0.1:<port> przez wbudowany węzeł).
             webViewClient = object : WebViewClient() {
@@ -126,7 +132,7 @@ class MainActivity : Activity() {
     private fun applyZoom() {
         if (!::web.isInitialized) return
         // Tylko lokalny dsh (127.0.0.1); strony z komputera przez pośrednik Code też są lokalne, logowanie Tailscale idzie w przeglądarce.
-        web.evaluateJavascript("if(document.documentElement.style.zoom!=='$UI_ZOOM')document.documentElement.style.zoom='$UI_ZOOM'", null)
+        web.evaluateJavascript("""(function(){var z=$UI_ZOOM;var m=document.querySelector('meta[name=viewport]');if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}var w=Math.round(screen.width/z);var c='width='+w+', initial-scale='+z+', minimum-scale='+z+', maximum-scale='+z+', viewport-fit=cover';if(m.content!==c){m.content=c;}if(document.documentElement.style.zoom){document.documentElement.style.zoom='';}})()""", null)
     }
     private val barsTick = object : Runnable { override fun run() { applyZoom(); syncBars(); bars.postDelayed(this, 2000) } }
     override fun onResume() { super.onResume(); bars.post(barsTick) }

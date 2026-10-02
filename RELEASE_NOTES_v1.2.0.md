@@ -1,6 +1,6 @@
 # DSH Mobile 1.2.0
 
-**DeepSeek Harness 0.2.0-rc.2 · versionCode 26 · payload 21 · arm64 · ok. 620 MB**
+**DeepSeek Harness 0.2.0-rc.2 · versionCode 27 · payload 21 · arm64 · ok. 620 MB**
 
 *English summary: DeepSeek Harness upgraded from 0.1.5-rc.3 to **0.2.0-rc.2**; the UI is rendered 1.2× larger on the phone and the Android status/navigation bars follow the page background. Also: (plugin manager, automation tasks, voice input, sidebar terminal and browser, Office/Excel previews, agent teams, keyboard shortcuts…). The Polish language pack now covers all **2446 strings** (1369 new). Two Android-specific fixes make 0.2.0 run on the phone: `koffi` pinned by dsh has no android-arm64 binary (resolved with an `overrides` to the newest 3.x that has one) and the new native `node-addon-require-builtin` has no Android variant (replaced by a JS package working under `--expose-internals`). The in-app updater applies both automatically and remembers a failed update instead of offering the same version again. Two community plugins (`dsh-memory-connect`, `dsh-reverse-skill`) are disabled by dsh 0.2.0 itself as incompatible.*
 
@@ -18,7 +18,7 @@
 
 ## Wygląd na telefonie
 
-- Interfejs dsh w WebView jest powiększony 1,2× (CSS `zoom`): ikony, tekst i przyciski są większe, a szerokość w pikselach CSS spada (411 → ok. 342 na ekranie okładkowym, ok. 850 → ok. 710 na rozłożonym Foldzie), więc układ mobilny obejmuje też duży ekran. Wartość: stała `UI_ZOOM` w MainActivity.
+- Interfejs dsh w WebView jest powiększony 1,2× przez meta viewport (szerokość strony = ekran/1,2, `initial-scale=1.2`): ikony, tekst i przyciski są większe, a szerokość w pikselach CSS spada (411 → ok. 342 na ekranie okładkowym, ok. 850 → ok. 708 na rozłożonym Foldzie), więc układ mobilny obejmuje też duży ekran. Wartość: stała `UI_ZOOM` w MainActivity. (Build 27 zastąpił CSS `zoom` z buildu 26, który rozjeżdżał pozycjonowanie wyskakujących menu: lista trybów dostępu w sesji z komputera wychodziła za ekran.)
 - Pasek stanu i pasek nawigacji Androida przyjmują kolor tła strony dsh (odczyt z WebView po wczytaniu i co 2 s, ikony paska jasne/ciemne zależnie od tła), zamiast odcienia z motywu systemowego.
 - Log apki dostaje linię `webview: {w, h, dpr, qolMobile, bg}` do diagnozy układu.
 
@@ -43,4 +43,4 @@ Aktualizacja z 1.1.0 bez odinstalowania (ten sam klucz). Pierwszy start rozpakow
 
 ## Sumy kontrolne
 
-`dsh-mobile.apk` — md5 `7aa42d60879f9d3d0bd483f4963ff469` (plik `dsh-mobile.apk.md5`).
+`dsh-mobile.apk` — md5 `715690714195259b78a7060858b3ebdc` (plik `dsh-mobile.apk.md5`).
