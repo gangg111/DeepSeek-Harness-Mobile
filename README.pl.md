@@ -84,6 +84,7 @@ Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 | zip nie przenosi dowiązań | `links.txt` odtwarzany przez `Os.symlink` |
 | skrypty z shebangiem Termuxa | `#!/system/bin/sh` + exec przez wbudowanego basha |
 | `koffi` w wersji bez binarki android-arm64 (dsh ≥ 0.2.0 przypina 3.1.1) | `overrides` w package.json na najnowszą wersję tej samej linii głównej, która binarkę ma |
+| npm po aktualizacji dsh zagnieżdża `@deepseek-ai/*` pod `@deepseek-ai/dsh/node_modules`, pluginy nie znajdują `@deepseek-ai/dsh-tools` | `android-hoist.mjs`: dowiązania na górze do zagnieżdżonych pakietów (w APK odtwarzane z `links.txt`) |
 | `node-addon-require-builtin` (dsh ≥ 0.2.0) bez wariantu android-arm64 i bez źródeł | pakiet JS `node-addon-require-builtin-android-arm64`, który pod `--expose-internals` zwraca wewnętrzne moduły zwykłym `require()` |
 
 ### Ekran Code i wbudowany Tailscale

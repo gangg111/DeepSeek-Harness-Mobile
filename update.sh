@@ -67,6 +67,8 @@ step_native() {
     cp "$STAGE/android-prebuilt/require-builtin-shim.js" "$rb/index.js"
     printf '{ "name": "node-addon-require-builtin-android-arm64", "version": "%s", "main": "./index.js", "os": ["android"], "cpu": ["arm64"], "license": "MIT" }\n' "$(ver node-addon-require-builtin)" > "$rb/package.json"
   fi
+  log "dowiązania do pakietów zagnieżdżonych pod @deepseek-ai/dsh (pluginy importują @deepseek-ai/dsh-tools itp.)"
+  node "$STAGE/android-hoist.mjs" "$DSH/node_modules"
   log "łatki na pluginy (stage/android-patches/*.mjs)"
   for f in "$STAGE"/android-patches/*.mjs; do [ -e "$f" ] && node "$f" "$DSH/node_modules"; done
   log "postinstall pozostałych pakietów"
@@ -151,8 +153,16 @@ step_pack() {
   log "payload.zip"
   local zipf="$APP/app/src/main/assets/payload.zip"
   rm -f "$zipf"
+  # Dowiązania z android-hoist.mjs: zip by je skopiował jako osobne katalogi (druga instancja modułu), więc wykluczamy je
+  # z archiwum i dopisujemy do links.txt — App.applyLinks odtworzy symlinki po rozpakowaniu.
+  local hoist="$DSH/node_modules/.android-hoist-links" excl; excl=$(mktemp)
+  if [ -s "$hoist" ]; then
+    cat "$hoist" >> "$STAGE/links.txt"
+    sed -E 's/ -> .*//' "$hoist" | while read -r l; do printf '%s\n%s/*\n' "$l" "$l"; done > "$excl"
+  fi
   (cd "$STAGE" && zip -q -r "$zipf" . -x 'home-verify/*' -x 'home/*' -x 'node_modules' -x 'node_modules/*')
-  (cd "$DSH" && zip -q -r "$zipf" node_modules -x 'node_modules/.bin/*')
+  (cd "$DSH" && zip -q -r "$zipf" node_modules -x 'node_modules/.bin/*' -x 'node_modules/.android-hoist-links' -x@"$excl")
+  rm -f "$excl"
   ls -la "$zipf"
   local app="$APP/app/src/main/java/com/dsh/mobile/App.kt" gradle="$APP/app/build.gradle.kts"
   local pv vc dshv

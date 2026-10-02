@@ -21,6 +21,9 @@ class ServerService : Service() {
         const val ACTION_STOP = "com.dsh.mobile.STOP"
         const val ACTION_UPDATE = "com.dsh.mobile.UPDATE"
         const val ACTION_REPOST = "com.dsh.mobile.REPOST"
+        /** Wydania APK: gdy aktualizator w apce nie poradzi sobie z nową wersją dsh, user ma stąd pobrać nową apkę. */
+        const val RELEASES_URL = "https://github.com/gangg111/DeepSeek-Harness-Mobile/releases"
+        @Volatile var updateFailed = false
         @Volatile var lastText = "Uruchamianie…"
         @Volatile var running = false
         @Volatile var stopRequested = false
@@ -104,12 +107,13 @@ class ServerService : Service() {
                 val result = app.runUpdater(listOf("--tag", "latest")) { line -> update("Aktualizacja: $line") }
                 val failedFile = File(app.filesDir, "home/.update-failed")
                 val msg = when {
-                    result.startsWith("ok ") -> { failedFile.delete(); "Zaktualizowano dsh do ${result.removePrefix("ok ")}" }
+                    result.startsWith("ok ") -> { failedFile.delete(); updateFailed = false; "Zaktualizowano dsh do ${result.removePrefix("ok ")}" }
                     result.startsWith("uptodate ") -> { failedFile.delete(); "dsh ${result.removePrefix("uptodate ")} jest aktualny" }
                     else -> {
                         // Zapamiętaj, żeby po restarcie nie proponować w kółko tej samej wersji bez słowa wyjaśnienia.
                         try { failedFile.writeText("${availableVersion ?: "?"}\n${result.removePrefix("error ")}") } catch (_: Throwable) {}
-                        "Aktualizacja nie powiodła się: ${result.removePrefix("error ")}"
+                        updateFailed = true
+                        "Aktualizacja nie powiodła się: ${result.removePrefix("error ")}. Ta wersja dsh wymaga nowej wersji apki — pobierz ją z $RELEASES_URL (przycisk „Pobierz APK”)."
                     }
                 }
                 availableVersion = null
@@ -128,9 +132,10 @@ class ServerService : Service() {
                 if (r.startsWith("available ")) {
                     availableVersion = r.removePrefix("available ")
                     val failed = try { File(app.filesDir, "home/.update-failed").readText().split("\n", limit = 2) } catch (_: Throwable) { null }
-                    if (failed != null && failed.size == 2 && failed[0] == availableVersion)
-                        update("Aktualizacja dsh $availableVersion nie powiodła się ostatnio: ${failed[1].take(200)}. „Aktualizuj” spróbuje ponownie; w ostateczności update.sh w Termuxie.")
-                    else update("Dostępna aktualizacja dsh ${availableVersion}. Otwórz powiadomienie → Aktualizuj.")
+                    if (failed != null && failed.size == 2 && failed[0] == availableVersion) {
+                        updateFailed = true
+                        update("dsh $availableVersion nie da się zaktualizować z apki (${failed[1].take(160)}). Pobierz nową wersję apki: $RELEASES_URL — przycisk „Pobierz APK”.")
+                    } else update("Dostępna aktualizacja dsh ${availableVersion}. Otwórz powiadomienie → Aktualizuj.")
                 }
             } catch (_: Throwable) {}
         }.start()
@@ -147,6 +152,7 @@ class ServerService : Service() {
         val stop = PendingIntent.getService(this, 1, Intent(this, ServerService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val upd = PendingIntent.getService(this, 2, Intent(this, ServerService::class.java).setAction(ACTION_UPDATE), PendingIntent.FLAG_IMMUTABLE)
         val repost = PendingIntent.getService(this, 3, Intent(this, ServerService::class.java).setAction(ACTION_REPOST), PendingIntent.FLAG_IMMUTABLE)
+        val releases = PendingIntent.getActivity(this, 4, Intent(Intent.ACTION_VIEW, android.net.Uri.parse(RELEASES_URL)), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
             .setContentTitle("DeepSeek Harness działa")
@@ -156,6 +162,7 @@ class ServerService : Service() {
             .setDeleteIntent(repost)
             .addAction(Notification.Action.Builder(null, "Zatrzymaj", stop).build())
             .addAction(Notification.Action.Builder(null, if (availableVersion != null) "Aktualizuj do $availableVersion" else "Aktualizuj", upd).build())
+            .apply { if (updateFailed) addAction(Notification.Action.Builder(null, "Pobierz APK", releases).build()) }
             .setStyle(Notification.BigTextStyle().bigText(text))
             .build()
     }

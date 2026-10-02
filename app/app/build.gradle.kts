@@ -13,8 +13,8 @@ android {
         // targetSdk 28 celowo: od API 29 SELinux blokuje exec/dlopen plików z katalogu danych
         // aplikacji, a node i addony .node muszą działać z filesDir (tak samo robi Termux).
         targetSdk = 28
-        versionCode = 22
-        versionName = "0.2.0-rc.2+19"
+        versionCode = 23
+        versionName = "0.2.0-rc.2+20"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     androidResources { noCompress += "zip" }

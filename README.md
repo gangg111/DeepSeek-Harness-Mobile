@@ -85,6 +85,7 @@ Workarounds needed for Termux's Node and dsh to run inside another app:
 | zip does not carry symlinks | `links.txt` recreated with `Os.symlink` |
 | scripts with Termux shebangs | `#!/system/bin/sh` + exec through the bundled bash |
 | `koffi` version without an android-arm64 binary (dsh ≥ 0.2.0 pins 3.1.1) | `overrides` in package.json to the newest version of the same major line that has the binary |
+| after a dsh upgrade npm nests `@deepseek-ai/*` under `@deepseek-ai/dsh/node_modules`, so plugins cannot find `@deepseek-ai/dsh-tools` | `android-hoist.mjs`: top-level symlinks to the nested packages (recreated from `links.txt` in the APK) |
 | `node-addon-require-builtin` (dsh ≥ 0.2.0) with no android-arm64 variant and no sources | a JS package `node-addon-require-builtin-android-arm64` that returns internal modules through plain `require()` under `--expose-internals` |
 
 ### Code screen and the built-in Tailscale node

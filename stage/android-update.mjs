@@ -51,7 +51,7 @@ try {
   if (!androidKoffi.includes(koffiVer)) {
     const major = koffiVer.split('.')[0];
     const pick = androidKoffi.filter((v) => v.startsWith(major + '.') && !v.includes('-')).sort((a, b) => cmpVer(a, b)).pop();
-    if (!pick) fail(`koffi ${koffiVer} nie ma binarki android-arm64 (dostępne: ${androidKoffi.join(', ')}) — uruchom update.sh w Termuxie`);
+    if (!pick) fail(`koffi ${koffiVer} nie ma binarki android-arm64 (dostępne: ${androidKoffi.join(', ')}) — ta wersja wymaga nowej wersji apki`);
     log(`koffi ${koffiVer} nie ma binarki android-arm64 → overrides koffi@${pick}`);
     const pj = JSON.parse(readFileSync(join(upd, 'package.json'), 'utf8'));
     pj.overrides = { ...(pj.overrides ?? {}), koffi: pick };
@@ -65,7 +65,7 @@ try {
   log('node-pty z prekompilowanego pliku…');
   const ptyVer = pkgVersion(upd, 'node-pty');
   const preVer = readFileSync(join(prebuilt, 'node-pty.version'), 'utf8').trim();
-  if (ptyVer !== preVer) fail(`node-pty ${ptyVer} wymaga przebudowy (prekompilowane ${preVer}); uruchom update.sh w Termuxie`);
+  if (ptyVer !== preVer) fail(`node-pty ${ptyVer} wymaga przebudowy (prekompilowane ${preVer}); ta wersja wymaga nowej wersji apki`);
   const rel = join(upd, 'node_modules/node-pty/build/Release'); mkdirSync(rel, { recursive: true });
   cpSync(join(prebuilt, 'pty.node'), join(rel, 'pty.node'));
   spawnSync(node, ['scripts/post-install.js'], { cwd: join(upd, 'node_modules/node-pty') });
@@ -80,7 +80,7 @@ try {
   const flockJs = join(nas, 'lib/flock.js');
   const src = readFileSync(flockJs, 'utf8');
   const patched = src.replace("if (platform !== 'linux' && platform !== 'darwin') {", "if (platform !== 'linux' && platform !== 'darwin' && platform !== 'android') {");
-  if (!patched.includes("platform !== 'android'")) fail('nie znaleziono miejsca do załatania w flock.js (zmiana upstream) — uruchom update.sh w Termuxie');
+  if (!patched.includes("platform !== 'android'")) fail('nie znaleziono miejsca do załatania w flock.js (zmiana upstream) — ta wersja wymaga nowej wersji apki');
   writeFileSync(flockJs, patched);
 
   // node-addon-require-builtin (dsh >= 0.2.0) nie ma wariantu android-arm64: podstawiamy pakiet JS działający pod --expose-internals.
@@ -90,6 +90,8 @@ try {
     cpSync(join(prebuilt, 'require-builtin-shim.js'), join(rb, 'index.js'));
     writeFileSync(join(rb, 'package.json'), JSON.stringify({ name: 'node-addon-require-builtin-android-arm64', version: pkgVersion(upd, 'node-addon-require-builtin'), main: './index.js', os: ['android'], cpu: ['arm64'], license: 'MIT' }, null, 2) + '\n');
   }
+  log('dowiązania do pakietów zagnieżdżonych pod @deepseek-ai/dsh…');
+  { const r = spawnSync(node, [join(root, 'android-hoist.mjs'), join(upd, 'node_modules')], { encoding: 'utf8' }); log((r.stdout || '').trim()); if (r.status !== 0) fail(`android-hoist: ${(r.stderr || '').trim().slice(-300)}`); }
   log('łatki na pluginy…');
   for (const f of (existsSync(join(root, 'android-patches')) ? readdirSync(join(root, 'android-patches')) : []).filter(n => n.endsWith('.mjs'))) {
     const r = spawnSync(node, [join(root, 'android-patches', f), join(upd, 'node_modules')], { encoding: 'utf8' });
