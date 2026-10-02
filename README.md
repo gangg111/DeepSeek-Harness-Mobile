@@ -2,7 +2,7 @@
 
 **DeepSeek Harness w jednej apce na telefon, bez Termuxa i roota, po polsku, z kompletem narzędzi programistycznych.**
 
-*English summary: a self-contained Android APK that runs the full [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (Node.js agent harness with a web GUI) on-device, with a bundled toolchain (C/C++ via Zig, JDK 21, Kotlin, Python 3.14, Node 26, jadx, apktool, git, ffmpeg…), a Polish language pack, a curated set of community plugins, Edge TTS and an in-app updater. Built entirely inside Termux on an arm64 phone.*
+*English summary: a self-contained Android APK that runs the full [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (Node.js agent harness with a web GUI) on-device, with a bundled toolchain (C/C++ via Zig, JDK 21, Kotlin, Python 3.14, Node 26, jadx, apktool, git, ffmpeg…), a Polish language pack, a curated set of community plugins, Edge TTS, an in-app updater and a **Code** screen that opens DeepSeek Harness sessions from your computers over a **built-in Tailscale node** (tsnet, no VPN app needed, computers discovered automatically). Built entirely inside Termux on an arm64 phone.*
 
 ---
 
@@ -45,6 +45,7 @@ Wymagania: Android 9+ (targetSdk 28 celowo, patrz niżej), arm64, ok. 2 GB wolne
 - TTS: przycisk głośnika przy odpowiedzi, przełącznik „Czytaj automatycznie" w kompozytorze, ustawienia w Ustawienia → Pluginy → Głos. Domyślny głos `pl-PL-ZofiaNeural`, liczbę równoległych syntez ustawia `DSH_TTS_EDGE_PARALLEL` (domyślnie 30).
 - Aktualizacja dsh: powiadomienie → „Aktualizuj". Po starcie apka sprawdza npm i pokazuje dostępną wersję.
 - `AGENTS.md` z katalogu roboczego trafia do kontekstu modelu.
+- **Code** (pasek boczny): sesje DeepSeek Harness z Twoich komputerów. Pierwszy raz: „Zaloguj Tailscale” (otwiera się przeglądarka systemowa, apka staje się urządzeniem `dsh-mobile` w tailnecie). Komputery z wtyczką `dsh-remote-control` pojawiają się same; dotknięcie sesji otwiera ją z pełną historią, wiadomości i zdjęcia działają jak na PC. „Dodaj urządzenie” to zapas do wpisania adresu ręcznie. Gdy węzeł nie jest zalogowany, a apka Tailscale (VPN) jest włączona, działa stara droga bezpośrednia.
 
 ## Jak to działa
 
@@ -81,6 +82,10 @@ Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 | zip nie przenosi dowiązań | `links.txt` odtwarzany przez `Os.symlink` |
 | skrypty z shebangiem Termuxa | `#!/system/bin/sh` + exec przez wbudowanego basha |
 
+### Ekran Code i wbudowany Tailscale
+
+`code/dsh-code` to plugin dsh (host + klient). Serwer uruchamia `bin/dsh-tsnet-mobile` (`tsnet/`, Go, budowany natywnie w Termuxie z `GOOS=android`), czyli węzeł Tailscale w procesie, bez TUN i bez VPN. Oficjalny `tailscaled` nie startuje na Androidzie, bo SELinux odmawia aplikacjom netlinka; program listuje interfejsy przez `ioctl SIOCGIFCONF`. Dla każdego komputera program otwiera lokalny pośrednik `127.0.0.1:<stały port>` i przekazuje HTTP oraz WebSocket do `https://<pc>.ts.net` (Host/Origin na adres komputera, Location z powrotem na lokalny, Set-Cookie bez Secure). Wejście wymaga sekretu losowanego przy starcie (przekazywanego do programu wyłącznie przez zmienną środowiska), potem ciasteczka sesji HttpOnly SameSite=Strict; serwer używa nagłówka `X-DSH-Secret`; bez nich 403. Urządzenia z tailnetu są sondowane (`/__remote/api/info`, 4 s, `dsh-*` najpierw, do 4 naraz, ponawianie tylko po zmianie stanu online) i te z `dsh-remote-control` trafiają do `dsh-code.json` w katalogu apki, który przeżywa aktualizacje. Po stronie PC wymagane: wtyczka `dsh-remote-control` i włączone „HTTPS Certificates” w panelu tailnetu.
+
 ## Budowanie ze źródeł (Termux, arm64)
 
 Wymagania: Termux z `nodejs` (26), `python` (3.14), `clang`, `openjdk-21`, `git`, `zip`, `aapt2`, `apksigner`, `gradle` przez wrapper projektu, oraz pakiety narzędzi kopiowanych do payloadu (`binutils`, `ripgrep`, `fd`, `jq`, `tree`, `file`, `ffmpeg`, `sqlite`, `kotlin`, `dex2jar`, `cmake`, `make`, `python-numpy`…). Pułapki Gradle/aapt2 na Termuxie opisuje `app/gradle.properties`.
@@ -90,7 +95,7 @@ Wymagania: Termux z `nodejs` (26), `python` (3.14), `clang`, `openjdk-21`, `git`
 mkdir ~/dsh-test && cd ~/dsh-test && npm init -y && npm install --ignore-scripts --force @deepseek-ai/dsh
 # 2. komplet narzędzi z Termuxa + pobrane archiwa (zig, jadx, apktool) -> tools/root
 tools/build-tools.sh
-# 3. pełny przebieg: npm -> łatki natywne -> runtime -> pakiet językowy -> payload -> APK
+# 3. pełny przebieg: npm -> łatki natywne -> runtime -> pakiet językowy -> węzeł Tailscale (pkg install golang) -> payload -> APK
 ./update.sh                 # opcje: --tag alpha|X.Y.Z  --skip-npm  --force  --debug
 ```
 
@@ -108,7 +113,8 @@ Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku). 
 - Apka nie ma menedżera pakietów: pip buduje tylko czyste pakiety Pythona, npm instaluje tylko pakiety bez części natywnej.
 - Aktualizator w apce wymaga tej samej wersji `node-pty` co prekompilowana; przy innej odsyła do `update.sh` w Termuxie (tam jest kompilator).
 - Przy 30 równoległych połączeniach i bardzo długich odpowiedziach Microsoft może odrzucać część z nich; plugin ponawia fragment, a w ostateczności go pomija.
-- Rozmiar: APK ok. 600 MB, po rozpakowaniu ok. 1,3 GB; razem z APK potrzeba ok. 2 GB wolnego miejsca.
+- Rozmiar: APK ok. 620 MB, po rozpakowaniu ok. 1,3 GB; razem z APK potrzeba ok. 2 GB wolnego miejsca.
+- Ekran Code: wejście do pośrednika działa tylko z ekranu Code (ciasteczko SameSite=Strict), a komputer musi mieć włączone „HTTPS Certificates” w tailnecie, inaczej `tls: internal error`.
 
 ## Licencje komponentów
 
@@ -126,6 +132,7 @@ Kod tej apki: MIT. APK zawiera oprogramowanie osób trzecich na ich licencjach:
 | Python 3.14, numpy | PSF / BSD |
 | bash, coreutils, findutils, grep, sed, gawk, diffutils, patch, tar, gzip, make, binutils, wget (Termux) | GPLv3 |
 | git | GPLv2 |
+| Tailscale (`tsnet`) i biblioteki Go programu `dsh-tsnet-mobile` | BSD-3-Clause; zależności wg ich licencji (BSD/MIT/Apache 2.0) |
 | ffmpeg | LGPL/GPL (build Termuxa) |
 | curl, openssl, sqlite, zip/unzip, xz, bzip2, jq, ripgrep, fd, tree, file, cmake | licencje własne (MIT/BSD/zlib i podobne) |
 | pluginy społeczności dsh (dsh-qol, dsh-memory-connect, dsh-turn-rewind, dsh-reverse-skill, dsh-patch-edit-plus, dsh-repeat-stop, dsh-tool-budget, dsh-clock-context, dsh-todo-continuity, dsh-mcp-bridge, dsh-plugin-tts) | wg repozytoriów autorów (MIT) |
@@ -139,5 +146,8 @@ app/            projekt Gradle (Kotlin): App.kt, ServerService.kt, MainActivity.
 stage/          runtime i pliki payloadu (bez node_modules — te są w ~/dsh-test)
 tools/          build-tools.sh, merge-tools.sh, apply-links.sh, test-tools.sh, root/ (wynik)
 locale-pl/      polski pakiet językowy: extract-en.mjs, pl-*.json, build-plugin.mjs, android.patch.yml
+code/dsh-code/  plugin ekranu Code (host: index.js, tsnet.js, discover.js; klient: client.js; testy node)
+tsnet/          dsh-tsnet-mobile: wbudowany węzeł Tailscale w Go (tsnet, pośrednik, API sterujące, testy)
+tap-outside/    plugin zamykania panelu bocznego dotknięciem obok
 update.sh       pełny przebieg budowania i aktualizacji
 ```
