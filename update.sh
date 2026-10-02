@@ -113,9 +113,11 @@ step_stage() {
   command -v go >/dev/null || { echo "BŁĄD: brak go (pkg install golang)"; exit 1; }
   (cd "$ROOT/tsnet" && go vet ./... && go test ./... >/dev/null && go build -trimpath -ldflags='-s -w' -o "$STAGE/bin/dsh-tsnet-mobile" .)
   # Raport: klucze, które nowe dsh dodało, a pl.json ich nie ma (pokażą się po angielsku) — do ręcznego dotłumaczenia.
-  (cd "$ROOT/locale-pl" && node extract-en.mjs "$DSH/node_modules/@deepseek-ai" en.json >/dev/null && node -e '
+  # Od dsh 0.2.0 npm zagnieżdża pakiety @deepseek-ai/* pod @deepseek-ai/dsh/node_modules (stare wersje zostają na górze dla peerów pluginów).
+  local nsdir="$DSH/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai"; [ -d "$nsdir" ] || nsdir="$DSH/node_modules/@deepseek-ai"
+  (cd "$ROOT/locale-pl" && node extract-en.mjs "$nsdir" en.json >/dev/null && node -e '
     const en=require("./en.json"), pl=require("./pl.json"); const miss=[];
-    for (const [ns,d] of Object.entries(en)) for (const k of Object.keys(d)) if (k!=="__ref" && !(pl[ns]?.[k])) miss.push(ns+"."+k);
+    for (const [ns,d] of Object.entries(en)) for (const k of Object.keys(d)) if (k!=="__ref" && pl[ns]?.[k]===undefined) miss.push(ns+"."+k);   // pusty napis to celowe tłumaczenie, nie brak
     console.log(miss.length ? "BRAK TŁUMACZEŃ (" + miss.length + "): " + miss.join(" ") : "tłumaczenie kompletne");')
   log "npm + prekompilowane addony dla aktualizatora w apce"
   rm -rf "$STAGE/lib/node_modules"; mkdir -p "$STAGE/lib/node_modules"

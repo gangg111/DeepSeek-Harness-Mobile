@@ -20,7 +20,7 @@ A self-contained Android APK that runs the full [DeepSeek Harness](https://githu
 One APK packs:
 
 - **DeepSeek Harness** (`@deepseek-ai/dsh`, web profile) running on the bundled Node.js 26 from Termux,
-- a **Polish UI** (language pack through the official dsh locale mechanism, 41 namespaces, 1219 strings; the UI language follows the system or the Settings → General → Language setting, English stays available),
+- a **Polish UI** (language pack through the official dsh locale mechanism, 58 namespaces, 2446 strings, since 1.2.0 covering the new dsh 0.2.0 screens: plugin manager, automation tasks, voice input, sidebar terminal and browser; the UI language follows the system or the Settings → General → Language setting, English stays available),
 - **tools for the model**, all on the `PATH` of the bundled `bash`:
   - compilers: `cc`/`gcc`/`clang`/`c++`/`g++` (Zig, producing static binaries that run on Android), JDK 21 (`java`, `javac`, `jar`, `javap`, `jshell`), `kotlinc`, Python 3.14 with pip and numpy, Node 26 with npm/npx, `make`, `cmake`,
   - reverse engineering: `jadx`, `apktool`, `d2j-dex2jar` and the rest of dex2jar, `aapt`, `aapt2`, GNU binutils (`objdump`, `nm`, `readelf`, `strings`, `ar`, `ld`, `as`),
@@ -84,6 +84,8 @@ Workarounds needed for Termux's Node and dsh to run inside another app:
 | no sandbox (Landlock/bwrap) | `DSH_PERMISSION_MODE=danger-full-access` |
 | zip does not carry symlinks | `links.txt` recreated with `Os.symlink` |
 | scripts with Termux shebangs | `#!/system/bin/sh` + exec through the bundled bash |
+| `koffi` version without an android-arm64 binary (dsh ≥ 0.2.0 pins 3.1.1) | `overrides` in package.json to the newest version of the same major line that has the binary |
+| `node-addon-require-builtin` (dsh ≥ 0.2.0) with no android-arm64 variant and no sources | a JS package `node-addon-require-builtin-android-arm64` that returns internal modules through plain `require()` under `--expose-internals` |
 
 ### Code screen and the built-in Tailscale node
 
@@ -117,6 +119,7 @@ Tests: `tools/test-tools.sh <rt>` (38 toolchain tests in a clean environment), `
 - The in-app updater requires the same `node-pty` version as the precompiled one; otherwise it points to `update.sh` in Termux (where the compiler is).
 - With 30 parallel connections and very long replies, Microsoft may reject some of them; the plugin retries the fragment and skips it as a last resort.
 - Size: APK about 620 MB, about 1.3 GB unpacked; about 2 GB of free space including the APK.
+- dsh 0.2.0 disables the `dsh-memory-connect` (cross-session memory) and `dsh-reverse-skill` (reverse-engineering skills) plugins as incompatible: their authors declare compatibility with dsh 0.1.x only. They come back once compatible versions appear.
 - Code screen: the proxy can only be entered from the Code screen (SameSite=Strict cookie), and the computer needs “HTTPS Certificates” enabled in the tailnet, otherwise `tls: internal error`.
 
 ## Component licenses

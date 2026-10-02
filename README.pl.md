@@ -20,7 +20,7 @@
 Apka pakuje w jeden plik APK:
 
 - **DeepSeek Harness** (`@deepseek-ai/dsh`, profil web) uruchamiany na wbudowanym Node.js 26 z Termuxa,
-- **polski interfejs** (pakiet językowy przez oficjalny mechanizm locale dsh, 41 obszarów, 1219 napisów),
+- **polski interfejs** (pakiet językowy przez oficjalny mechanizm locale dsh, 58 przestrzeni nazw, 2446 napisów; od 1.2.0 także nowe ekrany dsh 0.2.0: menedżer pluginów, zadania automatyczne, wprowadzanie głosowe, terminal i przeglądarka w panelu),
 - **narzędzia dla modelu**, wszystkie na `PATH` narzędzia `bash`:
   - kompilatory: `cc`/`gcc`/`clang`/`c++`/`g++` (Zig, statyczne binarki działające na Androidzie), JDK 21 (`java`, `javac`, `jar`, `javap`, `jshell`), `kotlinc`, Python 3.14 z pip i numpy, Node 26 z npm/npx, `make`, `cmake`,
   - inżynieria wsteczna: `jadx`, `apktool`, `d2j-dex2jar` i reszta dex2jar, `aapt`, `aapt2`, GNU binutils (`objdump`, `nm`, `readelf`, `strings`, `ar`, `ld`, `as`),
@@ -83,6 +83,8 @@ Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 | brak sandboxa (Landlock/bwrap) | `DSH_PERMISSION_MODE=danger-full-access` |
 | zip nie przenosi dowiązań | `links.txt` odtwarzany przez `Os.symlink` |
 | skrypty z shebangiem Termuxa | `#!/system/bin/sh` + exec przez wbudowanego basha |
+| `koffi` w wersji bez binarki android-arm64 (dsh ≥ 0.2.0 przypina 3.1.1) | `overrides` w package.json na najnowszą wersję tej samej linii głównej, która binarkę ma |
+| `node-addon-require-builtin` (dsh ≥ 0.2.0) bez wariantu android-arm64 i bez źródeł | pakiet JS `node-addon-require-builtin-android-arm64`, który pod `--expose-internals` zwraca wewnętrzne moduły zwykłym `require()` |
 
 ### Ekran Code i wbudowany Tailscale
 
@@ -116,6 +118,7 @@ Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku). 
 - Aktualizator w apce wymaga tej samej wersji `node-pty` co prekompilowana; przy innej odsyła do `update.sh` w Termuxie (tam jest kompilator).
 - Przy 30 równoległych połączeniach i bardzo długich odpowiedziach Microsoft może odrzucać część z nich; plugin ponawia fragment, a w ostateczności go pomija.
 - Rozmiar: APK ok. 620 MB, po rozpakowaniu ok. 1,3 GB; razem z APK potrzeba ok. 2 GB wolnego miejsca.
+- dsh 0.2.0 wyłącza jako niezgodne pluginy `dsh-memory-connect` (pamięć między sesjami) i `dsh-reverse-skill` (skille inżynierii wstecznej): ich autorzy deklarują zgodność tylko z dsh 0.1.x. Wrócą, gdy pojawią się zgodne wersje.
 - Ekran Code: wejście do pośrednika działa tylko z ekranu Code (ciasteczko SameSite=Strict), a komputer musi mieć włączone „HTTPS Certificates” w tailnecie, inaczej `tls: internal error`.
 
 ## Licencje komponentów
