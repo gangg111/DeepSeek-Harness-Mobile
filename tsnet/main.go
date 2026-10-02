@@ -103,11 +103,15 @@ func main() {
 		st, err := lc.Status(ctx)
 		cancel()
 		if err == nil && st.BackendState == "Running" && !time.Now().Before(nextPeers) {
-			if peers := peersFromStatus(st); !peersSent || !samePeers(peers, lastPeers) {
+			peers := peersFromStatus(st)
+			if !peersSent || !samePeers(peers, lastPeers) {
 				emitPeers(peers)
 				lastPeers, peersSent = peers, true
 			}
-			nextPeers = time.Now().Add(30 * time.Second)
+			// Tuż po Running mapa sieci bywa jeszcze pusta: sprawdzaj co sekundę aż do pierwszej listy, potem co 30 s.
+			if len(peers) > 0 {
+				nextPeers = time.Now().Add(30 * time.Second)
+			}
 		}
 		cur := stateLine{}
 		if err != nil {

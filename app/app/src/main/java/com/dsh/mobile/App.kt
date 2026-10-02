@@ -11,7 +11,7 @@ import java.util.zip.ZipInputStream
 class App : Application() {
     companion object {
         const val TAG = "dsh"
-        const val PAYLOAD_VERSION = "16"
+        const val PAYLOAD_VERSION = "18"
         @Volatile var url: String? = null
         @Volatile var status: String = "start"
         @Volatile var process: Process? = null

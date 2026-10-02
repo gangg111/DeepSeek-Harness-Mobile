@@ -18,7 +18,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { openUrl, startTsnet, tsnetBinaryPath } from './tsnet.js'
-import { MAX_PARALLEL, acceptProbe, hostOf, planProbes, runLimited } from './discover.js'
+import { MAX_PARALLEL, acceptProbe, hostOf, nextDue, planProbes, recordFailure, runLimited } from './discover.js'
 
 export const name = 'dsh-code'
 export const inject = ['webServer', 'connection']
@@ -38,20 +38,24 @@ export function apply(ctx) {
   // Wykrywanie komputerów: patrz lib/discover.js. `probed` = ostatni sondowany stan online per host (ponawiamy
   // tylko po zmianie); `inFlight` dla ekranu („Szukam komputerów…”).
   const probed = new Map()
-  let inFlight = 0, peersSeen = false
+  let inFlight = 0, peersSeen = false, retryTimer = null
+  const clock = () => new Date().toTimeString().slice(0, 8)
   async function discover(peers) {
     peersSeen = true
+    clearTimeout(retryTimer)
     const due = planProbes(peers, data.devices, data.ignored, probed)
-    if (!due.length) return
     inFlight += due.length
     try {
       await runLimited(due, MAX_PARALLEL, async (host) => {
-        const online = peers.find((p) => String(p.DNSName).toLowerCase() === host)?.Online ?? true
-        probed.set(host, { online })
+        const t0 = Date.now()
         let r
         try { r = await tsnet.probe(host) } catch (e) { r = { target: host, error: e.message } }
+        const took = `${((Date.now() - t0) / 1000).toFixed(1)} s`
         const name = acceptProbe(r)
-        console.log(`[dsh-code] sonda ${host}: ${r.error ? `błąd ${r.error}` : `HTTP ${r.status} ${JSON.stringify(r.body ?? null)}`}${name ? ` -> dodaję „${name}”` : ''}`)
+        const entry = name ? { online: true } : recordFailure(probed.get(host))
+        probed.set(host, entry)
+        const retry = entry.nextAt ? `, ponowię za ${Math.round((entry.nextAt - Date.now()) / 1000)} s` : name ? '' : ', koniec ponowień do zmiany stanu online'
+        console.log(`[dsh-code] ${clock()} sonda ${host} (próba ${entry.failures ?? 1}, ${took}): ${r.error ? `błąd ${r.error}` : `HTTP ${r.status} ${JSON.stringify(r.body ?? null)}`}${name ? ` -> dodaję „${name}”` : retry}`)
         if (!name) return
         const url = `https://${host}/`
         if (data.devices.some((d) => hostOf(d.url) === host) || data.ignored.includes(host)) return
@@ -59,7 +63,11 @@ export function apply(ctx) {
         save()
       })
     } finally { inFlight -= due.length }
+    // Ponowienia po nieudanych sondach (30 s, 2 min, 10 min) na ostatniej znanej liście urządzeń.
+    const at = nextDue(probed)
+    if (at !== null) { retryTimer = setTimeout(() => discover(tsnet.peers()).catch((e) => console.log(`[dsh-code] wykrywanie: ${e.message}`)), Math.max(0, at - Date.now()) + 50); retryTimer.unref?.() }
   }
+  ctx.effect(() => () => clearTimeout(retryTimer), 'dsh-code: discovery timer')
   /** Czy trwa szukanie (dla pustej listy): węzeł działa i albo jeszcze nie ma listy urządzeń, albo sondy w toku. */
   const discovering = () => !!tsnet && tsnet.running() && (!peersSeen || inFlight > 0)
   if (!bin) console.log('[dsh-code] brak programu dsh-tsnet-mobile — tylko droga przez apkę Tailscale (VPN)')
