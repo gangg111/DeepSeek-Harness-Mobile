@@ -5,7 +5,10 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.webkit.ValueCallback
@@ -21,7 +24,12 @@ class MainActivity : Activity() {
     private lateinit var label: TextView
     private var fileCallback: ValueCallback<Array<Uri>>? = null
 
-    private companion object { const val REQ_FILES = 41 }
+    private companion object {
+        const val REQ_FILES = 41
+        /** Powiększenie strony dsh w WebView: na telefonie ikony i tekst interfejsu są za małe (user, 2026-10-02). CSS `zoom`
+         *  skaluje wszystko (także ikony) i zmniejsza szerokość w px CSS, więc układ mobilny (próg 768 px) obejmuje też rozłożony Fold. */
+        const val UI_ZOOM = "1.2"
+    }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -53,6 +61,14 @@ class MainActivity : Activity() {
                         startActivity(Intent(Intent.ACTION_VIEW, request.url)); return true
                     }
                     return false
+                }
+                override fun onPageFinished(view: WebView, url: String?) {
+                    applyZoom()
+                    syncBars()
+                    // Diagnostyka układu (raz na stronę): szerokość CSS decyduje o mobilnym/desktopowym układzie dsh i dsh-qol (próg 768 px).
+                    view.evaluateJavascript("JSON.stringify({w:innerWidth,h:innerHeight,dpr:devicePixelRatio,qolMobile:!!document.querySelector('[data-qol-appframe]'),bg:getComputedStyle(document.body).backgroundColor})") {
+                        (application as App).log("webview: ${it?.trim('"')?.replace("\\\"", "\"")}")
+                    }
                 }
             }
             webChromeClient = object : WebChromeClient() {
@@ -86,6 +102,35 @@ class MainActivity : Activity() {
         App.onStatus = { s -> runOnUiThread { label.text = s; if (App.url == null) { web.visibility = View.GONE; label.visibility = View.VISIBLE } } }
         App.url?.let { show(it) }
     }
+
+    /**
+     * Pasek stanu i nawigacji w kolorze tła strony: motyw Androida ma własny odcień, a dsh zmienia tło
+     * (jasny/ciemny, odcienie między wersjami), więc kolor czytamy z WebView i odświeżamy co 2 s.
+     */
+    private val bars = Handler(Looper.getMainLooper())
+    private var lastBar = 0
+    private fun syncBars() {
+        if (!::web.isInitialized || web.visibility != View.VISIBLE) return
+        web.evaluateJavascript("getComputedStyle(document.body).backgroundColor") { raw ->
+            val m = Regex("""rgba?\((\d+),\s*(\d+),\s*(\d+)""").find(raw ?: "") ?: return@evaluateJavascript
+            val (r, g, b) = m.destructured
+            val c = Color.rgb(r.toInt(), g.toInt(), b.toInt())
+            if (c == lastBar) return@evaluateJavascript
+            lastBar = c
+            window.statusBarColor = c; window.navigationBarColor = c
+            val light = (0.299 * r.toInt() + 0.587 * g.toInt() + 0.114 * b.toInt()) > 150
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = if (light) View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0
+        }
+    }
+    private fun applyZoom() {
+        if (!::web.isInitialized) return
+        // Tylko lokalny dsh (127.0.0.1); strony z komputera przez pośrednik Code też są lokalne, logowanie Tailscale idzie w przeglądarce.
+        web.evaluateJavascript("if(document.documentElement.style.zoom!=='$UI_ZOOM')document.documentElement.style.zoom='$UI_ZOOM'", null)
+    }
+    private val barsTick = object : Runnable { override fun run() { applyZoom(); syncBars(); bars.postDelayed(this, 2000) } }
+    override fun onResume() { super.onResume(); bars.post(barsTick) }
+    override fun onPause() { super.onPause(); bars.removeCallbacks(barsTick) }
 
     private var loadedUrl: String? = null
     private fun show(url: String) {

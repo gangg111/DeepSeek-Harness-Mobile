@@ -47,6 +47,7 @@ Requirements: Android 9+ (targetSdk 28 on purpose, see below), arm64, about 2 GB
 - TTS: speaker button next to a reply, “Read automatically” toggle in the composer, settings under Settings → Plugins → Voice. Default voice `pl-PL-ZofiaNeural`; `DSH_TTS_EDGE_PARALLEL` sets the number of parallel syntheses (default 30).
 - Updating dsh: notification → “Update”. After start the app checks npm and shows the available version.
 - `AGENTS.md` from the working directory goes into the model's context.
+- The UI is rendered 1.2× larger than in a desktop browser (constant `UI_ZOOM` in `MainActivity.kt`), and the Android status/navigation bars take the page background color.
 - **Code** (sidebar): DeepSeek Harness sessions from your computers. First time: “Sign in to Tailscale” (the system browser opens; the app becomes the `dsh-mobile` device in your tailnet). Computers running the [`dsh-remote-control`](https://github.com/gangg111/dsh-remote-control) plugin appear on their own; tapping a session opens it with full history, and messages and photos work as on the PC. “Add device” remains as a manual fallback. When the node is not signed in but the Tailscale app (VPN) is on, the old direct route still works.
 
 ## How it works
