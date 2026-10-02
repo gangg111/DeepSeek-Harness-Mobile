@@ -1,8 +1,10 @@
 # DSH Mobile: DeepSeek Harness na Androidzie
 
+**Polski · [English](README.en.md)**
+
 **DeepSeek Harness w jednej apce na telefon, bez Termuxa i roota, po polsku, z kompletem narzędzi programistycznych.**
 
-*English summary: a self-contained Android APK that runs the full [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (Node.js agent harness with a web GUI) on-device, with a bundled toolchain (C/C++ via Zig, JDK 21, Kotlin, Python 3.14, Node 26, jadx, apktool, git, ffmpeg…), a Polish language pack, a curated set of community plugins, Edge TTS, an in-app updater and a **Code** screen that opens DeepSeek Harness sessions from your computers over a **built-in Tailscale node** (tsnet, no VPN app needed, computers running [dsh-remote-control](https://github.com/gangg111/dsh-remote-control) are discovered automatically). Built entirely inside Termux on an arm64 phone.*
+*English summary: a self-contained Android APK that runs the full [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) on-device with a bundled toolchain, a Polish language pack, community plugins, Edge TTS, an in-app updater and a **Code** screen that opens sessions from your computers over a built-in Tailscale node. Full English README: [README.en.md](README.en.md).*
 
 ---
 
