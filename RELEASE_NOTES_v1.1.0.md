@@ -1,6 +1,6 @@
 # DSH Mobile 1.1.0
 
-**DeepSeek Harness 0.1.5-rc.3 · versionCode 19 · payload 16 · arm64 · ok. 620 MB**
+**DeepSeek Harness 0.1.5-rc.3 · versionCode 21 · payload 18 · arm64 · ok. 620 MB**
 
 *English summary: the new **Code** screen lists DeepSeek Harness sessions running on your computers and opens them on the phone with full history, attachments and model selection. Connectivity is provided by a **built-in Tailscale node** (Go, `tsnet`) inside the app: no Tailscale app, no Android VPN. Computers running the `dsh-remote-control` plugin are **discovered automatically** on the tailnet. All traffic between the WebView and the computer goes through a local loopback proxy guarded by a per-launch secret.*
 
@@ -12,6 +12,7 @@
 - **Lokalny pośrednik z sekretem**: WebView i serwer rozmawiają z komputerem przez `127.0.0.1:<stały port urządzenia>`. Wejście wymaga sekretu losowanego przy każdym starcie, potem ciasteczka sesji (HttpOnly, SameSite=Strict); bez nich 403, także dla WebSocket. Sekret nie trafia do komputera, plików ani logów. Stały port na urządzenie zachowuje ciasteczka i localStorage DSH z komputera między restartami.
 - Załączniki w kompozytorze (zdjęcia, pliki) działają w WebView.
 - Apka loguje przy starcie wersję buildu i payloadu (`/sdcard/Download/dsh_log.txt`).
+- Nieudana sonda komputera jest ponawiana po 30 s, 2 min i 10 min, potem dopiero po zmianie jego stanu online (asset podmieniony 2026-10-02 na build 21).
 
 ## Dlaczego własny węzeł, a nie tailscaled
 
@@ -44,4 +45,4 @@ Nowe w tym wydaniu: Tailscale / `tsnet` (BSD-3-Clause), biblioteki Go wg ich lic
 
 ## Sumy kontrolne
 
-`dsh-mobile.apk` — md5 `57b2603acb010a9999beaf14b5054def` (plik `dsh-mobile.apk.md5`).
+`dsh-mobile.apk` — md5 `7e3afca8ef0c0831cfaf52123a743039` (plik `dsh-mobile.apk.md5`).
