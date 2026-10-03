@@ -92,6 +92,8 @@ window.__ModuleLoader__.load({
         const [error, setError] = useState(null)
         const [filter, setFilter] = useState('all')
         const [adding, setAdding] = useState(false)
+        // Pola tekstowe są niekontrolowane (defaultValue + onInput): kontrolowane `value` + odświeżanie listy co 5 s
+        // psuło kompozycję tekstu klawiatury Androida (pierwsza litera zaznaczona, następna ją zastępowała).
         const [address, setAddress] = useState('')
         const [busy, setBusy] = useState(false)
         const [formError, setFormError] = useState(null)
@@ -140,7 +142,7 @@ window.__ModuleLoader__.load({
             adding ? null : h('button', { style: S.pill, onClick: () => { setAdding(true); setFormError(null) } }, h(PlusIcon), t('addDevice')),
           ),
           adding ? h('div', { style: { marginTop: 12 } },
-            h('input', { style: S.input, value: address, placeholder: 'dsh-pc.tail1234.ts.net', 'aria-label': t('address'), autoFocus: true, inputMode: 'url', autoCapitalize: 'none', autoCorrect: 'off', onChange: (e) => setAddress(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') addDevice() } }),
+            h('input', { style: S.input, defaultValue: '', autoComplete: 'off', placeholder: 'dsh-pc.tail1234.ts.net', 'aria-label': t('address'), autoFocus: true, inputMode: 'url', autoCapitalize: 'none', autoCorrect: 'off', onInput: (e) => setAddress(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') addDevice() } }),
             formError ? h('div', { style: S.error }, formError) : null,
             h('div', { style: { ...S.row, marginTop: 10 } },
               h('button', { style: S.pill, disabled: busy || !address.trim(), onClick: addDevice }, busy ? h(Spinner, { size: 16 }) : h(PlusIcon, { size: 16 }), t('add')),
@@ -209,7 +211,7 @@ window.__ModuleLoader__.load({
           h('label', { style: { display: 'block', marginBottom: 12 } }, t('workspace'),
             workspaces ? h('select', { style: select, value: workspaceId, onChange: (e) => setWorkspaceId(e.target.value) }, ...workspaces.map((w) => h('option', { key: w.id, value: w.id }, w.name)))
               : h('div', { style: S.empty }, t('loading'))),
-          h('textarea', { style: { ...S.input, minHeight: 90, resize: 'vertical' }, placeholder: t('firstMessage'), value: text, onChange: (e) => setText(e.target.value) }),
+          h('textarea', { style: { ...S.input, minHeight: 90, resize: 'vertical' }, placeholder: t('firstMessage'), defaultValue: '', onInput: (e) => setText(e.target.value) }),
           error ? h('div', { style: S.error }, error) : null,
           h('div', { style: { ...S.row, marginTop: 14, justifyContent: 'flex-end' } },
             h('button', { style: S.pill, onClick: onClose }, t('cancel')),
