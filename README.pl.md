@@ -48,6 +48,7 @@ Wymagania: Android 9+ (targetSdk 28 celowo, patrz niżej), arm64, ok. 2 GB wolne
 - Aktualizacja dsh: powiadomienie → „Aktualizuj". Po starcie apka sprawdza npm i pokazuje dostępną wersję.
 - `AGENTS.md` z katalogu roboczego trafia do kontekstu modelu.
 - Interfejs jest powiększony 1,2× względem wersji przeglądarkowej (meta viewport: szerokość strony = ekran/1,2; stała `UI_ZOOM` w `MainActivity.kt`), a paski systemowe Androida przyjmują kolor tła strony.
+- Klawiatura w polach dsh działa bez podpowiedzi, autokorekty i pisania gestem (WebView zgłasza pole jako „widoczne hasło”): edytor kompozytora (Lexical) z klawiaturą składającą słowa, np. Samsung, zaznaczał pierwszą literę i nadpisywał ją następną (Lexical #7210). Bez składania słów błąd nie występuje.
 - **Code** (pasek boczny): sesje DeepSeek Harness z Twoich komputerów. Pierwszy raz: „Zaloguj Tailscale” (otwiera się przeglądarka systemowa, apka staje się urządzeniem `dsh-mobile` w tailnecie). Komputery z wtyczką [`dsh-remote-control`](https://github.com/gangg111/dsh-remote-control) pojawiają się same; dotknięcie sesji otwiera ją z pełną historią, wiadomości i zdjęcia działają jak na PC. „Dodaj urządzenie” to zapas do wpisania adresu ręcznie. Gdy węzeł nie jest zalogowany, a apka Tailscale (VPN) jest włączona, działa stara droga bezpośrednia.
 
 ## Jak to działa

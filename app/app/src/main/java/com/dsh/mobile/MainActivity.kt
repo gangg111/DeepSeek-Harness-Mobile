@@ -18,6 +18,28 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
+import android.content.Context
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+
+/**
+ * WebView zgłaszający klawiaturze „bez podpowiedzi”: kompozytor dsh (edytor Lexical na contenteditable) z tekstem
+ * predykcyjnym klawiatury Samsunga zaznacza wpisaną literę i nadpisuje ją następną (Lexical #7210). Bez składania
+ * słów przez klawiaturę błąd nie występuje; koszt: brak paska podpowiedzi w polach dsh w apce.
+ */
+class ImeWebView(ctx: Context) : WebView(ctx) {
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+        val ic = super.onCreateInputConnection(outAttrs)
+        if (outAttrs.inputType and InputType.TYPE_MASK_CLASS == InputType.TYPE_CLASS_TEXT) {
+            // Samsung HoneyBoard ignoruje NO_SUGGESTIONS i dalej składa słowa (insertCompositionText); składanie wyłącza
+            // dopiero wariant „widoczne hasło”. Zachowujemy flagę wielu linii (Enter = nowa linia w kompozytorze).
+            val multiline = outAttrs.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or multiline
+        }
+        return ic
+    }
+}
 
 class MainActivity : Activity() {
     private lateinit var web: WebView
@@ -32,6 +54,8 @@ class MainActivity : Activity() {
          *  Foldzie), a wyskakujące menu pozycjonują się poprawnie. CSS `zoom` na html rozjeżdżał floating-ui: lista trybów
          *  dostępu w sesji z komputera wychodziła za dół ekranu. */
         const val UI_ZOOM = "1.2"
+        /** Build diagnostyczny: wyłącza viewport 1,2×, atrybuty na edytorze i odpytywanie co 2 s (bisekcja „zjadanej litery”). */
+        const val PLAIN_WEBVIEW = false
     }
 
     @Deprecated("Deprecated in Java")
@@ -51,7 +75,7 @@ class MainActivity : Activity() {
         // Po „Zatrzymaj" z powiadomienia proces apki żyje, więc App.onCreate nie zadziała ponownie.
         if (App.process?.isAlive != true) ServerService.start(this)
         val frame = FrameLayout(this)
-        web = WebView(this).apply {
+        web = ImeWebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
@@ -69,7 +93,7 @@ class MainActivity : Activity() {
                     return false
                 }
                 override fun onPageFinished(view: WebView, url: String?) {
-                    applyZoom()
+                    if (!PLAIN_WEBVIEW) applyZoom()
                     syncBars()
                     // Diagnostyka układu (raz na stronę): szerokość CSS decyduje o mobilnym/desktopowym układzie dsh i dsh-qol (próg 768 px).
                     view.evaluateJavascript("JSON.stringify({w:innerWidth,h:innerHeight,dpr:devicePixelRatio,qolMobile:!!document.querySelector('[data-qol-appframe]'),bg:getComputedStyle(document.body).backgroundColor})") {
@@ -135,7 +159,7 @@ class MainActivity : Activity() {
         web.evaluateJavascript("""(function(){var z=$UI_ZOOM;var m=document.querySelector('meta[name=viewport]');if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}var w=Math.round(screen.width/z);var c='width='+w+', initial-scale='+z+', minimum-scale='+z+', maximum-scale='+z+', viewport-fit=cover';if(m.content!==c){m.content=c;}if(document.documentElement.style.zoom){document.documentElement.style.zoom='';}})()""", null)
     }
     private val barsTick = object : Runnable { override fun run() { applyZoom(); syncBars(); bars.postDelayed(this, 2000) } }
-    override fun onResume() { super.onResume(); bars.post(barsTick) }
+    override fun onResume() { super.onResume(); if (!PLAIN_WEBVIEW) bars.post(barsTick) }
     override fun onPause() { super.onPause(); bars.removeCallbacks(barsTick) }
 
     private var loadedUrl: String? = null
