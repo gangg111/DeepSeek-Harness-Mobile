@@ -1,0 +1,88 @@
+{
+ "settings.agentPreset": {
+  "standardUnavailable": "Tryb standardowy jest niedostępny. Przywróć go albo wybierz inny dostępny tryb.",
+  "createPlugin": "Niech agent utworzy plugin",
+  "createPluginDescription": "Przejdź do trybu Twórcy i zrób własny plugin DSH",
+  "createPluginChecking": "Sprawdzanie, czy tryb Twórcy jest dostępny",
+  "createPluginUnavailable": "Chwilowo niedostępne. Otwórz to menu ponownie, żeby spróbować jeszcze raz",
+  "createPluginMissing": "Ta konfiguracja nie zawiera trybu Twórcy"
+ },
+ "conversation": {
+  "tool.preparing.content": "{kilobytes} KB"
+ },
+ "pluginManager": {
+  "chooseAddMethod": "Wybierz sposób dodania pluginu",
+  "installExisting": "Zainstaluj zewnętrzny plugin",
+  "installExistingDescription": "Obsługuje pakiety npm, repozytoria Git i katalogi lokalne",
+  "sourceTitle": "Źródło",
+  "sourceSpec": "Źródło kodu",
+  "sourceBuiltIn": "Wbudowany",
+  "sourceVersion": "Bieżąca wersja",
+  "installDoneOtherVersion": "Zgodnie z polityką bezpieczeństwa łańcucha dostaw pnpm (minimumReleaseAge) wersje opublikowane później, niż pozwala wymagany wiek, nie są instalowane automatycznie, dlatego zainstalowano {installed} zamiast najnowszej wersji {version}. Świeżo opublikowana wersja nie przeszła jeszcze tego okresu oczekiwania i może zawierać niewykryty złośliwy kod lub błędy. Jeśli potrzebujesz {version}, odinstaluj bieżącą wersję, a potem zainstaluj {exact}, żeby zażądać tej wersji."
+ },
+ "schedule.manager": {
+  "detail.records": "Zapisy",
+  "timing.subagentSession": "Ta sesja należy do podagenta, który nigdy nie dostaje dostarczanych przypomnień."
+ },
+ "settings.account": {
+  "noResponse": "Coś poszło nie tak. Sprawdź połączenie z siecią i spróbuj ponownie."
+ },
+ "workspace": {
+  "draft.workspaceRequired": "Najpierw wybierz obszar roboczy.",
+  "draft.initializationFailed": "Nie udało się wypełnić szkicu. Spróbuj ponownie za chwilę."
+ },
+ "session-inspector": {
+  "tab.title": "Dziennik sesji",
+  "tab.description": "Analizuj w panelu bocznym surowe logi i pogrupowane wiadomości czatu bieżącej sesji.",
+  "view.presentation": "Prezentacja",
+  "view.sessionLog": "Surowy log",
+  "view.chatNode": "Grupa czatu",
+  "picker.pick": "Wskaż element w widoku czatu",
+  "picker.cancel": "Anuluj wskazywanie (Esc)",
+  "picker.instructions": "Najedź na element w głównym czacie, żeby go podejrzeć, potem kliknij, żeby go wybrać. Esc anuluje.",
+  "picker.noMatch": "Brak pasującego zapisu w tej tabeli. Wskaż inny element albo naciśnij Esc, żeby anulować.",
+  "picker.noChat": "Przed wskazywaniem otwórz tę sesję w głównym czacie.",
+  "table.id": "Indeks",
+  "table.type": "Typ",
+  "filter.title": "Filtruj typy",
+  "filter.input": "Wpisz słowo kluczowe",
+  "filter.placeholder": "Wpisz fragment, np. delta",
+  "filter.help": "Dopasowanie po zawieraniu (*słowo*). Enter zatwierdza, Esc anuluje.",
+  "filter.candidates": "Podpowiedzi typów",
+  "filter.loading": "Szukanie podpowiedzi…",
+  "filter.failed": "Nie udało się wczytać podpowiedzi typów.",
+  "filter.noCandidates": "Brak podpowiedzi. Nadal możesz zastosować to słowo kluczowe.",
+  "filter.clear": "Wyczyść",
+  "filter.cancel": "Anuluj",
+  "filter.apply": "Zastosuj filtr",
+  "filter.context": "Kontekst nadrzędny pasującego zapisu",
+  "table.location": "T/K",
+  "table.time": "Czas (UTC)",
+  "table.data": "Dane",
+  "table.older": "Wczytaj wcześniejsze",
+  "table.loading": "Wczytywanie…",
+  "table.latest": "Śledź najnowsze",
+  "table.empty": "Brak zapisów",
+  "table.raw": "Surowe dane",
+  "table.rawError": "Nie udało się zserializować tego zapisu. Wybierz inny zapis, żeby kontynuować.",
+  "table.resizeDetails": "Zmień rozmiar panelu surowych danych",
+  "table.close": "Zamknij",
+  "table.expand": "Rozwiń elementy podrzędne",
+  "table.collapse": "Zwiń elementy podrzędne",
+  "table.removed": "Ten zapis został usunięty albo rozliczony. Wybierz bieżący zapis.",
+  "object.node": "Węzeł",
+  "object.nodeData": "Dane węzła",
+  "object.group": "Grupa",
+  "object.groupData": "Dane grupy",
+  "object.turn": "Tura",
+  "object.turnData": "Dane tury",
+  "object.step": "Krok",
+  "object.stepData": "Dane kroku",
+  "object.accessor": "[Getter / setter, nie obliczono]",
+  "object.empty": "Puste",
+  "object.absent": "[Pusty slot]",
+  "object.properties": "Pozostałe właściwości",
+  "object.more": "Pokaż więcej",
+  "object.navigation": "Nawigacja po surowych danych"
+ }
+}

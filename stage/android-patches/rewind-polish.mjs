@@ -165,6 +165,11 @@ const MAP = [
   ['删除', 'Usuń'],
   ['关闭', 'Zamknij'],
   ['取消', 'Anuluj'],
+  // resztki z 0.3.8/0.3.9: przykład w nawiasie, nieudane czyszczenie, pełnoszerokie zakończenia zdań
+  ['`（例如 ${example}）`', '` (np. ${example})`'],
+  [' 个工作区清理失败', ' obszarów roboczych nie udało się wyczyścić'],
+  ["''}。`", "''}.`"],
+  ['）。`', ').`'],
 ];
 // \uXXXX w źródle (np. "将恢复 ") -> dekoduj do znaków, żeby podmiana tekstowa działała
 s = s.replace(/\\u([0-9a-fA-F]{4})/g, (m, h) => { const code = parseInt(h, 16); return code >= 0x80 ? String.fromCharCode(code) : m; });   // dekoduj wszystkie nie-ASCII escape'y (także interpunkcję pełnej szerokości)
@@ -175,6 +180,10 @@ for (const [zh, pl] of [...MAP].sort((a, b) => b[0].length - a[0].length)) {
 }
 const left = (s.match(/[一-鿿]/g) || []).length;
 if (missing.length > 8) throw new Error('rewind-polish: za dużo brakujących fraz (' + missing.length + ') — plugin zmienił się upstream: ' + missing.slice(0, 3).join(' | '));
+// Od 0.3.9 plugin sam wybiera tabelę napisów (zh/en) wg języka hosta i dla każdego innego niż zh bierze angielską —
+// spolszczona jest tabela chińska, więc polski interfejs ma wybierać ją (brak tej funkcji w <=0.3.8: nic do zmiany).
+s = s.replace("return /^zh(?:[-_]|$)/i.test(active) ? 'zh' : 'en';", "return /^(?:zh|pl)(?:[-_]|$)/i.test(active) ? 'zh' : 'en';");
+if (s.includes('function resolveUiLocale') && !s.includes('/^(?:zh|pl)')) throw new Error('rewind-polish: nie rozpoznano resolveUiLocale — plugin zmienił się upstream');
 s = s.replace('class RewindRequestError', '/* [android] rewind polish */ class RewindRequestError');
 if (!s.includes('[android] rewind polish')) throw new Error('rewind-polish: brak markera RewindRequestError');
 writeFileSync(file, s);

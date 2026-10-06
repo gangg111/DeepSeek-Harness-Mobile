@@ -10,6 +10,8 @@ const file = join(process.argv[2], '@anionex/dsh-turn-rewind/lib/client.js');
 if (!existsSync(file)) { console.log('rewind-inject-020: brak pluginu turn-rewind, pomijam'); process.exit(0); }
 let s = readFileSync(file, 'utf8');
 if (s.includes('[android] settingsScope optional')) { console.log('rewind-inject-020: już nałożona'); process.exit(0); }
+// Od 0.3.9 plugin sam czyta settingsScope przez ctx.get() i nie ma go w inject — łatka zbędna.
+if (!/exports\.inject = \[[^\]]*'settingsScope'/.test(s) && !s.includes('ctx.settingsScope')) { console.log('rewind-inject-020: niepotrzebna (naprawione upstream)'); process.exit(0); }
 const a = "exports.inject = ['slots', 'sessions', 'conversation', 'settingsScope'];";
 const b = "scope: ctx.settingsScope?.bind({ namespace: 'turn-rewind' }),";
 if (!s.includes(a) || !s.includes(b)) throw new Error('rewind-inject-020: nie znaleziono fragmentów — plugin zmienił się upstream');

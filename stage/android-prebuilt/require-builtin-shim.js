@@ -1,7 +1,7 @@
 'use strict';
 // Zamiennik natywnego dodatku node-addon-require-builtin dla android-arm64 (upstream nie publikuje binarki ani źródeł).
 // dsh na Androidzie i tak startuje z `node --expose-internals`, więc wewnętrzne moduły są dostępne zwykłym require().
-// Kształt obiektu i pola abi/backend muszą zgadzać się z walidacją w node-addon-native-custom-loader (napi-v9).
+// Kształt obiektu i pola product/abi/backend muszą zgadzać się z walidacją w node-addon-native-custom-loader (napi-v9; product od loadera 0.1.7).
 function requireBuiltin(id) {
   try { return require(id); } catch (e) {
     if (e && e.code === 'MODULE_NOT_FOUND' && String(id).startsWith('internal/')) {
@@ -11,5 +11,5 @@ function requireBuiltin(id) {
   }
 }
 function isAllowedInternalId(id) { return typeof id === 'string' && id.length > 0; }
-function getNativeBindingInfo() { return { mode: 'js-expose-internals', backend: 'napi', abi: 'napi-v9', platform: 'android-arm64' }; }
+function getNativeBindingInfo() { return { mode: 'js-expose-internals', product: 'require-builtin', backend: 'napi', abi: 'napi-v9', platform: 'android-arm64' }; }
 module.exports = { requireBuiltin, isAllowedInternalId, getNativeBindingInfo };
