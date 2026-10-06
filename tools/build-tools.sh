@@ -104,10 +104,13 @@ for n in c++ g++ clang++; do { echo '#!/system/bin/sh'; echo 'case " $* " in *" 
 chmod +x "$ROOT"/bin/* "$ROOT"/bin/.scripts/* "$ROOT"/libexec/git-core/* "$ROOT"/opt/jdk/bin/* "$ROOT"/opt/jdk/lib/jspawnhelper "$ROOT"/opt/zig/zig 2>/dev/null || true
 
 log "tools.env (zmienne obchodzące ścieżki Termuxa; \$RT = katalog runtime)"
+# GIT_CONFIG_NOSYSTEM: git ma wkompilowane usr/etc/gitconfig Termuxa; gdy Termux jest zainstalowany, plik istnieje, ale apka nie ma
+# do niego dostępu i git pada „unable to access …/gitconfig: Permission denied” (np. pnpm add github:…).
 cat > "$ROOT/tools.env" <<'EOF'
 JAVA_HOME=$RT/opt/jdk
 GIT_EXEC_PATH=$RT/libexec/git-core
 GIT_TEMPLATE_DIR=$RT/share/git-core/templates
+GIT_CONFIG_NOSYSTEM=1
 GIT_SSL_CAINFO=$RT/etc/tls/cert.pem
 CURL_CA_BUNDLE=$RT/etc/tls/cert.pem
 MAGIC=$RT/share/misc/magic.mgc

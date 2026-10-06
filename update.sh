@@ -128,6 +128,10 @@ step_stage() {
   log "npm + prekompilowane addony dla aktualizatora w apce"
   rm -rf "$STAGE/lib/node_modules"; mkdir -p "$STAGE/lib/node_modules"
   cp -r "$P/lib/node_modules/npm" "$STAGE/lib/node_modules/npm"; rm -rf "$STAGE/lib/node_modules/npm/docs" "$STAGE/lib/node_modules/npm/man"
+  # pnpm dla menedżera pluginów dsh („Dodaj plugin” woła pnpm z PATH); skrypt liczy ścieżkę względem siebie, bez dirname.
+  [ -d "$P/lib/node_modules/pnpm" ] || { echo "BŁĄD: brak pnpm (pkg install pnpm)"; exit 1; }
+  cp -r "$P/lib/node_modules/pnpm" "$STAGE/lib/node_modules/pnpm"
+  printf '#!/system/bin/sh\nd=${0%%/*}\nexec "$d/node" "$d/../lib/node_modules/pnpm/bin/pnpm.cjs" "$@"\n' > "$STAGE/bin/pnpm"; chmod 755 "$STAGE/bin/pnpm"
   mkdir -p "$STAGE/android-prebuilt"
   cp "$DSH/node_modules/node-pty/build/Release/pty.node" "$STAGE/android-prebuilt/pty.node"
   ver node-pty > "$STAGE/android-prebuilt/node-pty.version"
@@ -149,6 +153,7 @@ step_verify() {
   kill $pid 2>/dev/null || true; rm -rf "$home"
   if grep -q "^dsh web: http" "$logf"; then echo "OK: $(grep '^dsh web:' "$logf" | sed 's/token=.*/token=…/')"; rm -f "$logf"
   else echo "BŁĄD: serwer nie wystartował"; tail -40 "$logf"; rm -f "$logf"; exit 1; fi
+  echo "pnpm $(env -i LD_LIBRARY_PATH="$STAGE/lib" HOME="$STAGE" PATH="$STAGE/bin:/system/bin" pnpm --version)"
   "$STAGE/bin/python3" -c 'import ssl,sqlite3,ctypes,lzma,numpy; print("python OK", ssl.OPENSSL_VERSION, "numpy", numpy.__version__)' 2>/dev/null \
     || { LD_LIBRARY_PATH="$STAGE/lib" "$STAGE/bin/python3" -c 'import ssl,sqlite3,ctypes,lzma,numpy; print("python OK", "numpy", numpy.__version__)'; }
 }
