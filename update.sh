@@ -94,13 +94,17 @@ step_stage() {
   cp "$(readlink -f "$P/bin/bash")" "$STAGE/bin/bash"
   local pyv; pyv=$("$P/bin/python3" -c 'import sys;print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
   cp "$P/bin/python$pyv" "$STAGE/bin/python3"; cp "$P/bin/python$pyv" "$STAGE/bin/python"
-  rsync -a --delete --exclude '__pycache__' --exclude '/test' --exclude '/idlelib' --exclude '/tkinter' --exclude '/turtledemo' --exclude '/site-packages' "$P/lib/python$pyv" "$STAGE/lib/"
+  # Końcowe ukośniki: wykluczenia z '/' są kotwiczone w katalogu pythona (bez nich nic nie łapały i do APK szło
+  # całe site-packages Termuksa, np. torch). --delete-excluded czyści to, co zostało w stage z poprzednich buildów.
+  rsync -a --delete --delete-excluded --exclude '__pycache__' --exclude '/test' --exclude '/idlelib' --exclude '/tkinter' --exclude '/turtledemo' --exclude '/site-packages' "$P/lib/python$pyv/" "$STAGE/lib/python$pyv/"
   mkdir -p "$STAGE/lib/python$pyv/site-packages"
-  rsync -a --exclude '__pycache__' "$P/lib/python$pyv/site-packages/pip" "$P"/lib/python$pyv/site-packages/pip-*.dist-info "$STAGE/lib/python$pyv/site-packages/"
+  rsync -a --exclude '__pycache__' "$P/lib/python$pyv/site-packages/pip" "$P"/lib/python$pyv/site-packages/pip-*.dist-info \
+    "$P/lib/python$pyv/site-packages/numpy" "$P"/lib/python$pyv/site-packages/numpy-*.dist-info "$STAGE/lib/python$pyv/site-packages/"
   rm -f "$STAGE/lib/python$pyv/lib-dynload/_tkinter"*.so
   cp "$P/etc/tls/cert.pem" "$STAGE/etc/tls/cert.pem"
   closure "$STAGE/bin/node"; closure "$STAGE/bin/bash"; closure "$STAGE/bin/python3"
   for so in "$STAGE/lib/python$pyv"/lib-dynload/*.so; do closure "$so"; done
+  while IFS= read -r so; do closure "$so"; done < <(find "$STAGE/lib/python$pyv/site-packages/numpy" -name "*.so")   # libopenblas, libc++_shared
   test -f "$STAGE/android-shim.cjs" && test -f "$STAGE/android-update.mjs"
   log "komplet narzędzi (tools/root -> stage: zig, jdk, jadx, apktool, kotlin, git, ffmpeg, binutils…)"
   rm -rf "$STAGE/opt" "$STAGE/share" "$STAGE/libexec" "$STAGE/site-packages" "$STAGE/links.txt" "$STAGE/tools.env"
@@ -145,8 +149,8 @@ step_verify() {
   kill $pid 2>/dev/null || true; rm -rf "$home"
   if grep -q "^dsh web: http" "$logf"; then echo "OK: $(grep '^dsh web:' "$logf" | sed 's/token=.*/token=…/')"; rm -f "$logf"
   else echo "BŁĄD: serwer nie wystartował"; tail -40 "$logf"; rm -f "$logf"; exit 1; fi
-  "$STAGE/bin/python3" -c 'import ssl,sqlite3,ctypes,lzma; print("python OK", ssl.OPENSSL_VERSION)' 2>/dev/null \
-    || { LD_LIBRARY_PATH="$STAGE/lib" "$STAGE/bin/python3" -c 'import ssl,sqlite3,ctypes,lzma; print("python OK")'; }
+  "$STAGE/bin/python3" -c 'import ssl,sqlite3,ctypes,lzma,numpy; print("python OK", ssl.OPENSSL_VERSION, "numpy", numpy.__version__)' 2>/dev/null \
+    || { LD_LIBRARY_PATH="$STAGE/lib" "$STAGE/bin/python3" -c 'import ssl,sqlite3,ctypes,lzma,numpy; print("python OK", "numpy", numpy.__version__)'; }
 }
 
 step_pack() {
