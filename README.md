@@ -22,10 +22,11 @@ One APK packs:
 - **DeepSeek Harness** (`@deepseek-ai/dsh`, web profile) running on the bundled Node.js 26 from Termux,
 - a **Polish UI** (language pack through the official dsh locale mechanism, 58 namespaces, 2446 strings, since 1.2.0 covering the new dsh 0.2.0 screens: plugin manager, automation tasks, voice input, sidebar terminal and browser; the UI language follows the system or the Settings → General → Language setting, English stays available),
 - **tools for the model**, all on the `PATH` of the bundled `bash`:
-  - compilers: `cc`/`gcc`/`clang`/`c++`/`g++` (Zig, producing static binaries that run on Android), JDK 21 (`java`, `javac`, `jar`, `javap`, `jshell`), `kotlinc`, Python 3.14 with pip and numpy, Node 26 with npm/npx, `make`, `cmake`,
+  - compilers: `cc`/`gcc`/`clang`/`c++`/`g++` (Zig, producing static binaries that run on Android), JDK 21 (`java`, `javac`, `jar`, `javap`, `jshell`), `kotlinc`, Python 3.14 with pip and numpy, Node 26 with npm/npx and pnpm, `make`, `cmake`,
   - reverse engineering: `jadx`, `apktool`, `d2j-dex2jar` and the rest of dex2jar, `aapt`, `aapt2`, GNU binutils (`objdump`, `nm`, `readelf`, `strings`, `ar`, `ld`, `as`),
   - system: GNU coreutils, `sed`, `gawk`, `grep`, `find`, `diff`, `patch`, `tar`, `gzip`, `xz`, `bzip2`, `zip`, `unzip`, `rg`, `fd`, `jq`, `tree`, `file`, `curl`, `wget`, `git` (HTTPS), `sqlite3`, `openssl`, `ffmpeg`, `ffprobe`,
 - **community plugins**: mobile UI (dsh-qol), cross-session memory, turn rewind with file restore, loop breakers (repeat-stop, tool-budget), 87 reverse-engineering skills, diff-based file editing, clock in context, task list across turns, MCP bridge over stdio, TTS (Edge TTS with Polish voices, parallel synthesis of fragments),
+- a **working plugin manager**: the bundled pnpm lets Plugins → Add plugin install plugins from npm and GitHub just like on a computer; they show up under “Installed” and can be uninstalled there (the plugins built into the APK keep working but are not listed),
 - a **foreground service** that keeps the server alive in the background (notification with “Stop” and “Update” buttons),
 - an **in-app updater**: the bundled npm downloads a new dsh version, applies the Android patches from precompiled files, test-starts it and only then swaps the directory.
 
@@ -46,6 +47,7 @@ Requirements: Android 9+ (targetSdk 28 on purpose, see below), arm64, about 2 GB
 - Permission mode: the app sets `danger-full-access`, because the Android kernel has neither Landlock nor bubblewrap, and dsh refuses to run commands in sandboxed modes. Android itself isolates the process (app directory plus shared storage).
 - TTS: speaker button next to a reply, “Read automatically” toggle in the composer, settings under Settings → Plugins → Voice. Default voice `pl-PL-ZofiaNeural`; `DSH_TTS_EDGE_PARALLEL` sets the number of parallel syntheses (default 30).
 - Updating dsh: notification → “Update”. After start the app checks npm and shows the available version.
+- Installing plugins: Plugins → Add plugin → Install a third-party plugin. Use the full npm name including the scope (e.g. `@michengai/dsh-skills-manager`, not the unrelated `dsh-skills-manager`) or `github:owner/repo` for plugins published only on GitHub (e.g. `github:2002XiaoYu/dsh-session-diff`). dsh rejects plugins whose authors declare compatibility only with older dsh versions, and nothing is installed then.
 - `AGENTS.md` from the working directory goes into the model's context.
 - The UI is rendered 1.2× larger than in a desktop browser (viewport meta: page width = screen/1.2; constant `UI_ZOOM` in `MainActivity.kt`), and the Android status/navigation bars take the page background color.
 - The keyboard works without suggestions, autocorrect or swipe typing in dsh fields (the WebView reports fields as “visible password”): the composer editor (Lexical) with a composing keyboard such as Samsung's selected the first letter and overwrote it with the next one (Lexical #7210). Without word composition the bug does not occur.
@@ -77,7 +79,7 @@ Workarounds needed for Termux's Node and dsh to run inside another app:
 
 | Problem | Solution |
 |---|---|
-| Termux binaries have the prefix `/data/data/com.termux/files/usr` compiled in | `LD_LIBRARY_PATH`, `OPENSSL_CONF=/dev/null`, `SSL_CERT_FILE`, `GIT_EXEC_PATH`, `MAGIC`, `CMAKE_ROOT`… (`tools.env`) |
+| Termux binaries have the prefix `/data/data/com.termux/files/usr` compiled in | `LD_LIBRARY_PATH`, `OPENSSL_CONF=/dev/null`, `SSL_CERT_FILE`, `GIT_EXEC_PATH`, `GIT_CONFIG_NOSYSTEM=1`, `MAGIC`, `CMAKE_ROOT`… (`tools.env`) |
 | since API 29 Android blocks exec and dlopen from the app data directory | `targetSdk 28` (Termux does the same) |
 | SELinux forbids hard links (`link()`) | shim replacing `fs.link` with `copyFile(COPYFILE_EXCL)` |
 | the `flock` addon exists only for linux/darwin | `flock.c` compiled with clang as `node-addon-system-android-arm64` + loader patch |
@@ -89,6 +91,8 @@ Workarounds needed for Termux's Node and dsh to run inside another app:
 | `koffi` version without an android-arm64 binary (dsh ≥ 0.2.0 pins 3.1.1) | `overrides` in package.json to the newest version of the same major line that has the binary |
 | after a dsh upgrade npm nests `@deepseek-ai/*` under `@deepseek-ai/dsh/node_modules`, so plugins cannot find `@deepseek-ai/dsh-tools` | `android-hoist.mjs`: top-level symlinks to the nested packages (recreated from `links.txt` in the APK) |
 | `node-addon-require-builtin` (dsh ≥ 0.2.0) with no android-arm64 variant and no sources | a JS package `node-addon-require-builtin-android-arm64` that returns internal modules through plain `require()` under `--expose-internals` |
+| the dsh plugin manager calls `pnpm` from `PATH` (without it: “pnpm was not found”) | pnpm from Termux in `lib/node_modules/pnpm` plus a `bin/pnpm` script (`#!/system/bin/sh`, path relative to itself) |
+| git reads Termux's compiled-in `usr/etc/gitconfig`; with Termux installed the file exists but the app cannot read it (“Permission denied”, e.g. when installing a plugin from GitHub) | `GIT_CONFIG_NOSYSTEM=1` in `tools.env` |
 
 ### Code screen and the built-in Tailscale node
 
@@ -113,12 +117,12 @@ Tests: `tools/test-tools.sh <rt>` (38 toolchain tests in a clean environment), `
 
 ## Translation
 
-- dsh UI: `locale-pl/pl-1..4.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. After a dsh update, missing keys fall back to English; `update.sh` prints the list of untranslated keys.
+- dsh UI: `locale-pl/pl-1..6.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. After a dsh update, missing keys fall back to English; `update.sh` prints the list of untranslated keys.
 - Community plugins do not use the dsh locale mechanism (hard-coded Chinese strings or their own zh/en dictionaries), so they are localized by the patches `android-patches/{qol,rewind,tts}-polish.mjs`. When an author changes a string, the patch stops the update with a message so that Chinese strings never slip through silently.
 
 ## Limitations
 
-- The app has no package manager: pip builds only pure-Python packages, npm installs only packages without native parts.
+- The app has no package manager: pip builds only pure-Python packages, npm and pnpm install only packages without native parts (this also applies to plugins added from the plugin manager).
 - The in-app updater requires the same `node-pty` version as the precompiled one; otherwise it points to `update.sh` in Termux (where the compiler is).
 - With 30 parallel connections and very long replies, Microsoft may reject some of them; the plugin retries the fragment and skips it as a last resort.
 - Size: APK about 620 MB, about 1.3 GB unpacked; about 2 GB of free space including the APK.
@@ -141,6 +145,7 @@ This app's code: MIT. The APK contains third-party software under its own licens
 | Python 3.14, numpy | PSF / BSD |
 | bash, coreutils, findutils, grep, sed, gawk, diffutils, patch, tar, gzip, make, binutils, wget (Termux) | GPLv3 |
 | git | GPLv2 |
+| pnpm | MIT |
 | Tailscale (`tsnet`) and the Go libraries of `dsh-tsnet-mobile` | BSD-3-Clause; dependencies under their own licenses (BSD/MIT/Apache 2.0) |
 | ffmpeg | LGPL/GPL (Termux build) |
 | curl, openssl, sqlite, zip/unzip, xz, bzip2, jq, ripgrep, fd, tree, file, cmake | their own licenses (MIT/BSD/zlib and similar) |

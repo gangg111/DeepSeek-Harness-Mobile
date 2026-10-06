@@ -22,10 +22,11 @@ Apka pakuje w jeden plik APK:
 - **DeepSeek Harness** (`@deepseek-ai/dsh`, profil web) uruchamiany na wbudowanym Node.js 26 z Termuxa,
 - **polski interfejs** (pakiet językowy przez oficjalny mechanizm locale dsh, 58 przestrzeni nazw, 2446 napisów; od 1.2.0 także nowe ekrany dsh 0.2.0: menedżer pluginów, zadania automatyczne, wprowadzanie głosowe, terminal i przeglądarka w panelu),
 - **narzędzia dla modelu**, wszystkie na `PATH` narzędzia `bash`:
-  - kompilatory: `cc`/`gcc`/`clang`/`c++`/`g++` (Zig, statyczne binarki działające na Androidzie), JDK 21 (`java`, `javac`, `jar`, `javap`, `jshell`), `kotlinc`, Python 3.14 z pip i numpy, Node 26 z npm/npx, `make`, `cmake`,
+  - kompilatory: `cc`/`gcc`/`clang`/`c++`/`g++` (Zig, statyczne binarki działające na Androidzie), JDK 21 (`java`, `javac`, `jar`, `javap`, `jshell`), `kotlinc`, Python 3.14 z pip i numpy, Node 26 z npm/npx i pnpm, `make`, `cmake`,
   - inżynieria wsteczna: `jadx`, `apktool`, `d2j-dex2jar` i reszta dex2jar, `aapt`, `aapt2`, GNU binutils (`objdump`, `nm`, `readelf`, `strings`, `ar`, `ld`, `as`),
   - system: GNU coreutils, `sed`, `gawk`, `grep`, `find`, `diff`, `patch`, `tar`, `gzip`, `xz`, `bzip2`, `zip`, `unzip`, `rg`, `fd`, `jq`, `tree`, `file`, `curl`, `wget`, `git` (HTTPS), `sqlite3`, `openssl`, `ffmpeg`, `ffprobe`,
 - **pluginy społeczności**: mobilny UI (dsh-qol), pamięć między sesjami, cofanie tur z przywracaniem plików, bezpieczniki pętli (repeat-stop, tool-budget), 87 skilli inżynierii wstecznej, edycja plików diffem, zegar w kontekście, lista zadań między turami, most MCP po stdio, TTS (Edge TTS z polskimi głosami, równoległa synteza fragmentów),
+- **działający menedżer pluginów**: dzięki dołączonemu pnpm „Pluginy → Dodaj plugin” instaluje pluginy z npm i z GitHuba tak jak na komputerze; pokazują się w grupie „Zainstalowane” i tam można je odinstalować (pluginy wbudowane w APK działają dalej, ale nie są tam wymienione),
 - **usługę pierwszoplanową**, która trzyma serwer w tle (powiadomienie z przyciskami „Zatrzymaj" i „Aktualizuj"),
 - **aktualizator w apce**: wbudowany npm pobiera nową wersję dsh, nakłada łatki pod Androida z prekompilowanych plików, testuje start i dopiero wtedy podmienia katalog.
 
@@ -46,6 +47,7 @@ Wymagania: Android 9+ (targetSdk 28 celowo, patrz niżej), arm64, ok. 2 GB wolne
 - Tryb uprawnień: apka ustawia `danger-full-access`, bo jądro Androida nie ma Landlocka ani bubblewrapa, a dsh w trybach z sandboxem odmawia uruchamiania komend. Procesy izoluje sam Android (katalog apki + pamięć współdzielona).
 - TTS: przycisk głośnika przy odpowiedzi, przełącznik „Czytaj automatycznie" w kompozytorze, ustawienia w Ustawienia → Pluginy → Głos. Domyślny głos `pl-PL-ZofiaNeural`, liczbę równoległych syntez ustawia `DSH_TTS_EDGE_PARALLEL` (domyślnie 30).
 - Aktualizacja dsh: powiadomienie → „Aktualizuj". Po starcie apka sprawdza npm i pokazuje dostępną wersję.
+- Instalowanie pluginów: Pluginy → Dodaj plugin → Zainstaluj zewnętrzny plugin. Podawaj pełną nazwę z npm razem z zakresem (np. `@michengai/dsh-skills-manager`, a nie niezwiązany `dsh-skills-manager`) albo `github:właściciel/repo` dla pluginów wydanych tylko na GitHubie (np. `github:2002XiaoYu/dsh-session-diff`). dsh odrzuca pluginy, których autorzy deklarują zgodność tylko ze starszym dsh, i wtedy nic się nie instaluje.
 - `AGENTS.md` z katalogu roboczego trafia do kontekstu modelu.
 - Interfejs jest powiększony 1,2× względem wersji przeglądarkowej (meta viewport: szerokość strony = ekran/1,2; stała `UI_ZOOM` w `MainActivity.kt`), a paski systemowe Androida przyjmują kolor tła strony.
 - Klawiatura w polach dsh działa bez podpowiedzi, autokorekty i pisania gestem (WebView zgłasza pole jako „widoczne hasło”): edytor kompozytora (Lexical) z klawiaturą składającą słowa, np. Samsung, zaznaczał pierwszą literę i nadpisywał ją następną (Lexical #7210). Bez składania słów błąd nie występuje.
@@ -76,7 +78,7 @@ Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 
 | Problem | Rozwiązanie |
 |---|---|
-| binarki Termuxa mają wkompilowany prefiks `/data/data/com.termux/files/usr` | `LD_LIBRARY_PATH`, `OPENSSL_CONF=/dev/null`, `SSL_CERT_FILE`, `GIT_EXEC_PATH`, `MAGIC`, `CMAKE_ROOT`… (`tools.env`) |
+| binarki Termuxa mają wkompilowany prefiks `/data/data/com.termux/files/usr` | `LD_LIBRARY_PATH`, `OPENSSL_CONF=/dev/null`, `SSL_CERT_FILE`, `GIT_EXEC_PATH`, `GIT_CONFIG_NOSYSTEM=1`, `MAGIC`, `CMAKE_ROOT`… (`tools.env`) |
 | od API 29 Android blokuje exec i dlopen z katalogu danych apki | `targetSdk 28` (tak samo robi Termux) |
 | SELinux zabrania hardlinków `link()` | shim podmieniający `fs.link` na `copyFile(COPYFILE_EXCL)` |
 | addon `flock` tylko dla linux/darwin | `flock.c` skompilowany clangiem jako `node-addon-system-android-arm64` + patch loadera |
@@ -88,6 +90,8 @@ Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 | `koffi` w wersji bez binarki android-arm64 (dsh ≥ 0.2.0 przypina 3.1.1) | `overrides` w package.json na najnowszą wersję tej samej linii głównej, która binarkę ma |
 | npm po aktualizacji dsh zagnieżdża `@deepseek-ai/*` pod `@deepseek-ai/dsh/node_modules`, pluginy nie znajdują `@deepseek-ai/dsh-tools` | `android-hoist.mjs`: dowiązania na górze do zagnieżdżonych pakietów (w APK odtwarzane z `links.txt`) |
 | `node-addon-require-builtin` (dsh ≥ 0.2.0) bez wariantu android-arm64 i bez źródeł | pakiet JS `node-addon-require-builtin-android-arm64`, który pod `--expose-internals` zwraca wewnętrzne moduły zwykłym `require()` |
+| menedżer pluginów dsh woła `pnpm` z `PATH` (bez niego: „pnpm was not found”) | pnpm z Termuxa w `lib/node_modules/pnpm` i skrypt `bin/pnpm` (`#!/system/bin/sh`, ścieżka względem siebie) |
+| git czyta wkompilowany `usr/etc/gitconfig` Termuxa; gdy Termux jest zainstalowany, plik istnieje, ale apka nie może go odczytać („Permission denied”, np. przy instalacji pluginu z GitHuba) | `GIT_CONFIG_NOSYSTEM=1` w `tools.env` |
 
 ### Ekran Code i wbudowany Tailscale
 
@@ -112,12 +116,12 @@ Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku). 
 
 ## Tłumaczenie
 
-- Interfejs dsh: `locale-pl/pl-1..4.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. Po aktualizacji dsh brakujące klucze wyświetlają się po angielsku; `update.sh` wypisuje listę „BRAK TŁUMACZEŃ".
+- Interfejs dsh: `locale-pl/pl-1..6.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. Po aktualizacji dsh brakujące klucze wyświetlają się po angielsku; `update.sh` wypisuje listę „BRAK TŁUMACZEŃ".
 - Pluginy społeczności nie korzystają z mechanizmu locale dsh (chińskie napisy na sztywno albo własne słowniki zh/en), więc spolszczają je łatki `android-patches/{qol,rewind,tts}-polish.mjs`. Gdy autor zmieni tekst, łatka zatrzymuje aktualizację z komunikatem, żeby chińskie napisy nie przeszły po cichu.
 
 ## Ograniczenia
 
-- Apka nie ma menedżera pakietów: pip buduje tylko czyste pakiety Pythona, npm instaluje tylko pakiety bez części natywnej.
+- Apka nie ma menedżera pakietów: pip buduje tylko czyste pakiety Pythona, npm i pnpm instalują tylko pakiety bez części natywnej (dotyczy to też pluginów dodawanych z menedżera pluginów).
 - Aktualizator w apce wymaga tej samej wersji `node-pty` co prekompilowana; przy innej odsyła do `update.sh` w Termuxie (tam jest kompilator).
 - Przy 30 równoległych połączeniach i bardzo długich odpowiedziach Microsoft może odrzucać część z nich; plugin ponawia fragment, a w ostateczności go pomija.
 - Rozmiar: APK ok. 620 MB, po rozpakowaniu ok. 1,3 GB; razem z APK potrzeba ok. 2 GB wolnego miejsca.
@@ -140,6 +144,7 @@ Kod tej apki: MIT. APK zawiera oprogramowanie osób trzecich na ich licencjach:
 | Python 3.14, numpy | PSF / BSD |
 | bash, coreutils, findutils, grep, sed, gawk, diffutils, patch, tar, gzip, make, binutils, wget (Termux) | GPLv3 |
 | git | GPLv2 |
+| pnpm | MIT |
 | Tailscale (`tsnet`) i biblioteki Go programu `dsh-tsnet-mobile` | BSD-3-Clause; zależności wg ich licencji (BSD/MIT/Apache 2.0) |
 | ffmpeg | LGPL/GPL (build Termuxa) |
 | curl, openssl, sqlite, zip/unzip, xz, bzip2, jq, ripgrep, fd, tree, file, cmake | licencje własne (MIT/BSD/zlib i podobne) |
