@@ -171,4 +171,18 @@ test('przenoszenie sesji: komputer → telefon (skrzynka) i telefon → komputer
 
   const missing = await ph.call('POST', '/export', {})
   assert.equal(missing.status, 400)
+
+  // 3. skrzynka PC nie odpowiada: jeden wpis w logu (nie co obieg), po powrocie wpis „znowu odpowiada”.
+  const logged = []
+  const origLog = console.log
+  console.log = (m, ...rest) => { if (String(m).includes('/outbox na')) logged.push(String(m)); else origLog(m, ...rest) }
+  t.after(() => { console.log = origLog })
+  const origWaiting = pc.outbox.waiting.bind(pc.outbox)
+  pc.outbox.waiting = () => { throw new Error('skrzynka padła') }
+  await new Promise((r) => setTimeout(r, 1000))   // ~5 obiegów po 200 ms
+  pc.outbox.waiting = origWaiting
+  await waitFor(() => logged.some((m) => m.includes('znowu odpowiada')))
+  console.log = origLog
+  assert.equal(logged.filter((m) => m.includes('nie odpowiada')).length, 1, `jeden wpis o błędzie: ${JSON.stringify(logged)}`)
+  assert.match(logged[0], /HTTP 500|skrzynka padła/)
 })

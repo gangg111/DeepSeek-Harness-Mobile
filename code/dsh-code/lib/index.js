@@ -20,6 +20,8 @@ import { join } from 'node:path'
 import { openUrl, startTsnet, tsnetBinaryPath } from './tsnet.js'
 import { MAX_PARALLEL, acceptProbe, hostOf, nextDue, planProbes, recordFailure, runLimited } from './discover.js'
 import { createDshClient, importSession } from './vendor/transfer.js'
+import { appendTail, guardTurnStart, readTail, reloadSession, SeqMap, sessionState } from './vendor/sync.js'
+import { createRequire } from 'node:module'
 
 export const name = 'dsh-code'
 export const inject = ['webServer', 'connection']
@@ -31,6 +33,19 @@ const MAX_BODY = 64 * 1024
 const TRANSFER_TIMEOUT_MS = 5 * 60 * 1000
 const OUTBOX_POLL_MS = Number(process.env.DSH_CODE_OUTBOX_POLL_MS) || 15000   // zmienna tylko dla testów
 const OUTBOX_RETRY_MS = 5 * 60 * 1000
+/** Obieg synchronizacji, gdy są powiązania (tury PC → telefon); tury telefonu idą od razu po końcu tury (session/event). */
+const SYNC_POLL_MS = Number(process.env.DSH_CODE_SYNC_POLL_MS) || Math.min(4000, OUTBOX_POLL_MS)
+const SYNC_IDLE_MS = 15000            // bez powiązań: tak rzadko jak skrzynka
+const MISSING_RETRY_MS = 10 * 60 * 1000
+/**
+ * Synchronizacja tylko na wersji DSH, na której przeszedł test przejęcia (dsh-remote-control 306b380): `reloadSession`
+ * i bramka tury (`guardTurnStart`) opierają się na wnętrzu agenta DSH (`phase`). Historia: 2026-10-07 przejęcie bez
+ * wyrównania licznika tur dało w logu drugi `turn/start` o tym samym numerze i sesja przestała się wczytywać.
+ * DSH_CODE_SYNC=1/0 wymusza włączenie/wyłączenie (testy).
+ */
+const SYNC_TESTED_DSH = ['0.2.0-rc.2']
+const DSH_VERSION = (() => { try { return createRequire(import.meta.url)('@deepseek-ai/dsh/package.json').version } catch { return null } })()
+const SYNC_ENABLED = process.env.DSH_CODE_SYNC === '1' || (process.env.DSH_CODE_SYNC !== '0' && SYNC_TESTED_DSH.includes(DSH_VERSION))   // powiązanie do sesji, której nie ma na telefonie: ponów sprawdzenie po 10 min
 const CAPS_TTL_MS = 10 * 60 * 1000
 
 export function apply(ctx) {
@@ -193,6 +208,15 @@ export function apply(ctx) {
   const imported = new Map()    // transferId -> sessionId: zaimportowane, czekają tylko na potwierdzenie (bez ponownego importu)
   const received = []           // ostatnie odebrane (dla logu / ekranu)
   let pulling = false
+  const unreachable = new Map()  // `${trasa} ${device.id}` -> czas ostatniego wpisu w logu o błędzie połączenia
+  /** Błąd połączenia z /outbox albo /links: wpis w logu raz na MISSING_RETRY_MS i jeden po powrocie (zamiast ciszy co obieg). */
+  function reachability(device, path, error) {
+    const key = `${path} ${device.id}`, last = unreachable.get(key)
+    if (!error) { if (last) { unreachable.delete(key); console.log(`[dsh-code] ${path} na ${device.name} znowu odpowiada`) } return }
+    if (last && Date.now() - last < MISSING_RETRY_MS) return
+    unreachable.set(key, Date.now())
+    console.log(`[dsh-code] ${path} na ${device.name} nie odpowiada: ${describe(error)} (ponawiam co obieg, następny wpis za ${MISSING_RETRY_MS / 60000} min)`)
+  }
 
   /** Usuwa katalog sesji, której DSH nie przyjął przy kontrolnym odczycie po imporcie (jak brama PC). */
   async function removeSession(id) {
@@ -205,14 +229,17 @@ export function apply(ctx) {
   const transferLog = { warn: (m) => console.log(m) }
   const importOptions = { emit: (event, payload) => ctx.emit(event, payload), removeSession, log: transferLog }
 
-  async function supportsTransfer(device) {
+  async function deviceCaps(device) {
     const c = caps.get(device.id)
-    if (c && Date.now() - c.at < CAPS_TTL_MS) return c.transfer
-    let transfer = false
-    try { const info = await remote(device, '/info'); transfer = Array.isArray(info.capabilities) && info.capabilities.includes('session-transfer') } catch {}
-    caps.set(device.id, { at: Date.now(), transfer })
-    return transfer
+    if (c && Date.now() - c.at < CAPS_TTL_MS) return c
+    let list = []
+    try { const info = await remote(device, '/info'); if (Array.isArray(info.capabilities)) list = info.capabilities } catch {}
+    const entry = { at: Date.now(), transfer: list.includes('session-transfer'), sync: list.includes('session-sync') }
+    caps.set(device.id, entry)
+    return entry
   }
+  async function supportsTransfer(device) { return (await deviceCaps(device)).transfer }
+  async function supportsSync(device) { return (await deviceCaps(device)).sync }
 
   async function pullOutboxes() {
     if (pulling) return
@@ -221,7 +248,7 @@ export function apply(ctx) {
       for (const device of data.devices) {
         if (!(await supportsTransfer(device))) continue
         let items
-        try { ({ items } = await remote(device, '/outbox', { timeoutMs: 15000 })) } catch { continue }   // pierwsze połączenie przez tsnet potrafi trwać > 6 s   // komputer offline: spróbujemy przy następnym obiegu
+        try { ({ items } = await remote(device, '/outbox', { timeoutMs: 15000 })); reachability(device, '/outbox') } catch (error) { reachability(device, '/outbox', error); continue }   // pierwsze połączenie przez tsnet potrafi trwać > 6 s   // komputer offline: spróbujemy przy następnym obiegu
         for (const item of Array.isArray(items) ? items : []) {
           if (item.state && item.state !== 'waiting') continue
           if ((retryAt.get(item.transferId) ?? 0) > Date.now()) continue
@@ -235,6 +262,8 @@ export function apply(ctx) {
             const result = await importSession((service) => ctx.get(service), zip, importOptions)
             imported.set(item.transferId, result.sessionId)
             await acknowledge(device, item.transferId)
+            // Synchronizacja: właścicielem zostaje nadawca (PC), kopia na telefonie jest lustrem do czasu przejęcia.
+            await registerLink(device, { pcSessionId: item.sessionId, phoneSessionId: result.sessionId, owner: 'pc', sharedCount: result.events, title: result.title ?? item.title ?? undefined })
             retryAt.delete(item.transferId)
             received.unshift({ at: Date.now(), from: device.name, title: result.title ?? item.title ?? null, sessionId: result.sessionId })
             received.splice(10)
@@ -263,7 +292,9 @@ export function apply(ctx) {
   }
 
   ctx.effect(() => {
-    const timer = setInterval(() => { pullOutboxes().catch((e) => console.log(`[dsh-code] skrzynka: ${e.message}`)) }, OUTBOX_POLL_MS)
+    const timer = setInterval(() => {
+      pullOutboxes().catch((e) => console.log(`[dsh-code] skrzynka: ${e.message}`))
+    }, OUTBOX_POLL_MS)
     timer.unref?.()
     return () => clearInterval(timer)
   }, 'dsh-code: odbiór sesji z komputerów')
@@ -287,8 +318,251 @@ export function apply(ctx) {
     const t0 = Date.now()
     const result = await remote(target, '/sessions/import', { method: 'POST', body: zip, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS })
     console.log(`[dsh-code] wysłano sesję ${sessionId} na ${target.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}${result.modelChanged ? `; na PC model ${result.modelChanged.from} -> ${result.modelChanged.to}` : ''}`)
+    // Synchronizacja: właścicielem zostaje nadawca (telefon), kopia na PC jest lustrem do czasu przejęcia.
+    await registerLink(target, { pcSessionId: result.sessionId, phoneSessionId: sessionId, owner: 'phone', sharedCount: result.events, title: result.title ?? undefined })
     return { device: target.name, ...result }
   }
+
+  // --- Synchronizacja powiązanych sesji (dsh-remote-control >= 0.3.0, capability "session-sync"; lib/vendor/sync.js) ---
+  // Jeden właściciel (zapisywalny) i lustro tylko do odczytu; stan powiązań trzyma brama PC (GET/POST /links…), telefon jest
+  // kurierem: co obieg dociąga ogon PC do lustra na telefonie albo wysyła ogon telefonu do lustra na PC. Ogon kończy się na
+  // ostatniej zakończonej turze, dopisywanie tylko przez żywe Session.append (walidacja DSH), numery przez SeqMap powiązania.
+  const linkState = new Map()   // phoneSessionId -> { linkId, deviceId, deviceName, owner, claim, epoch, error }
+  const dirty = new Set()       // sesje telefonu z zakończoną turą do wysłania (z session/event)
+  const checked = new Set()     // sesje telefonu sprawdzone przynajmniej raz od startu (tury sprzed restartu)
+  const missing = new Map()     // phoneSessionId -> czas: powiązanie do sesji, której nie ma na telefonie
+  const present = new Set()     // sesje telefonu, których istnienie już potwierdzono
+  let syncing = false, lastFullSync = 0, kick = null
+
+  async function registerLink(device, body) {
+    if (!SYNC_ENABLED || !(await supportsSync(device))) return
+    try {
+      const link = await remote(device, '/links', { method: 'POST', body: JSON.stringify(body) })
+      linkState.set(body.phoneSessionId, { linkId: link.linkId, deviceId: device.id, deviceName: device.name, owner: link.owner, claim: link.claim ?? null, epoch: link.epoch, error: null })
+      console.log(`[dsh-code] powiązano sesję ${body.phoneSessionId} z ${device.name} (właściciel: ${link.owner === 'pc' ? 'komputer' : 'telefon'}, wspólne zdarzenia: ${body.sharedCount})`)
+    } catch (error) {
+      console.log(`[dsh-code] powiązanie sesji ${body.phoneSessionId} z ${device.name} nie powiodło się: ${describe(error)}`)
+    }
+  }
+
+  /** Czy telefon ma własne zakończone tury po `mark` (rozjazd: komputer przejął pisanie bez dostarczenia tych tur). */
+  async function ownTurnsAfter(sessionId, mark) {
+    const observed = await ctx.get('sessionQuery').observeSession(sessionId)
+    try { return observed.events.some((e) => e.seq > mark && e.type === 'turn/end') } finally { observed?.[Symbol.dispose]?.() }
+  }
+
+  async function syncOne(device, link) {
+    const get = (service) => ctx.get(service)
+    const id = link.linkId, phoneId = link.phoneSessionId
+    // Najpierw: czy ta sesja jest na telefonie (np. powiązanie testowe na PC wskazuje sesję, której tu nie ma) — błąd
+    // „Nie ma sesji …” trafia do syncLinks, które pomija takie powiązanie zamiast próbować co obieg.
+    if (!present.has(phoneId)) { await sessionState(get, phoneId); present.add(phoneId) }
+    const state = { linkId: id, deviceId: device.id, deviceName: device.name, owner: link.owner, claim: link.claim ?? null, epoch: link.epoch, error: link.lastError?.message ?? null, paused: link.paused ?? null }
+    linkState.set(phoneId, state)
+    if (link.paused) { state.error = link.paused.message; return }   // wstrzymane na PC: czekamy na „Wznów synchronizację”
+    if (link.owner === 'pc') {
+      if (link.pcMissing) { state.error = `Sesji nie ma już na ${device.name}.`; return }
+      if (link.forced && await ownTurnsAfter(phoneId, link.phoneMark)) {   // rozjazd możliwy tylko po przejęciu „bez telefonu”
+        await makeBranch(device, link, phoneId)
+        return
+      }
+      const boundary = link.pcBoundary ?? link.pcMark
+      if (boundary <= link.pcMark) return
+      const t0 = Date.now()
+      const res = await remoteFetch(device, `/links/${id}/events?after=${link.pcMark}&epoch=${link.epoch}`, { timeoutMs: TRANSFER_TIMEOUT_MS })
+      if (!res.ok) throw new Error(`ogon z ${device.name}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`)
+      const to = Number(res.headers.get('x-dsh-to'))
+      const zip = Buffer.from(await res.arrayBuffer())
+      const map = new SeqMap(link.runs)
+      const applied = await appendTail(get, phoneId, zip, (pcSeq) => map.toPhone(pcSeq))
+      // Agent lustra nie widzi dopisanych tur: wyrównanie jego licznika do logu (inaczej po przejęciu powtórzyłby numer tury).
+      const reload = tryReload(phoneId)
+      if (reload.error) applied.error = applied.error ?? `Wyrównanie licznika tur na telefonie: ${reload.error}`
+      const after = await sessionState(get, phoneId)
+      const updated = await remote(device, `/links/${id}/applied`, { method: 'POST', body: JSON.stringify({ epoch: link.epoch, ownerTo: to, mirrorLast: after.lastSeq, pairs: applied.pairs, error: applied.error }) })
+      state.error = applied.error ?? null
+      console.log(`[dsh-code] synchronizacja ${device.name} → telefon: ${applied.pairs.length} zdarzeń (PC ${link.pcMark + 1}..${to}), ${((Date.now() - t0) / 1000).toFixed(1)} s${applied.error ? `; przerwana: ${applied.error}` : ''} [epoch ${updated.epoch}]`)
+      return
+    }
+    // Właścicielem jest telefon: wyślij zakończone tury, potem ewentualnie oddaj pisanie na prośbę PC.
+    let phoneMark = link.phoneMark, epoch = link.epoch
+    if (!dirty.has(phoneId) && checked.has(phoneId) && !link.claim) return   // nic nowego od ostatniego obiegu
+    dirty.delete(phoneId); checked.add(phoneId)
+    const st = await sessionState(get, phoneId)
+    if (st.boundary !== undefined && st.boundary > phoneMark) {
+      const tail = await readTail(get, phoneId, phoneMark)
+      if (tail.toSeq > phoneMark) {
+        const t0 = Date.now()
+        const res = await remoteFetch(device, `/links/${id}/events?after=${phoneMark}&to=${tail.toSeq}&epoch=${epoch}`, { method: 'POST', body: tail.zip, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) { state.error = body.error ?? `HTTP ${res.status}`; throw new Error(`ogon do ${device.name}: ${state.error}`) }
+        phoneMark = body.phoneMark ?? phoneMark; epoch = body.epoch ?? epoch
+        state.error = null
+        console.log(`[dsh-code] synchronizacja telefon → ${device.name}: ${body.applied ?? 0} zdarzeń (telefon ${link.phoneMark + 1}..${tail.toSeq}), ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+      }
+    }
+    if (link.claim) {
+      const now = await sessionState(get, phoneId)
+      if (now.busy) return   // tura w toku: oddamy pisanie po jej zakończeniu
+      const confirmed = await remote(device, `/links/${id}/claim-confirm`, { method: 'POST', body: JSON.stringify({ epoch, phoneBoundary: now.boundary ?? phoneMark, phoneBusy: false }) })
+      Object.assign(state, { owner: confirmed.owner, claim: null, epoch: confirmed.epoch })
+      const reload = tryReload(phoneId)
+      if (reload.error) state.error = `Wyrównanie licznika tur na telefonie: ${reload.error}`
+      console.log(`[dsh-code] telefon oddał pisanie sesji ${phoneId} komputerowi ${device.name} [epoch ${confirmed.epoch}]`)
+    }
+  }
+
+  /**
+   * Rozjazd: komputer przejął pisanie bez telefonu, a telefon ma zakończone tury, których nie zdążył oddać. Sesja telefonu
+   * zostaje nietknięta jako gałąź („… (gałąź z telefonu)”), powiązanie jest odłączane po obu stronach, sesja na PC zostaje
+   * główną wersją. Nic nie jest nadpisywane ani usuwane; wersję z PC można wysłać na telefon ponownie (nowe powiązanie).
+   */
+  async function makeBranch(device, link, phoneId) {
+    let title = null
+    try {
+      const t = await ctx.get('sessionQuery')?.readTitle?.(phoneId)
+      title = typeof t === 'string' ? t : [t?.text, t?.title, t?.value].find((x) => typeof x === 'string' && x) ?? null
+    } catch {}
+    const branchTitle = `${title || link.title || 'Sesja'} (gałąź z telefonu)`
+    try { await ctx.get('sessionController')?.rename?.({ sessionId: phoneId, title: branchTitle }) } catch (error) { console.log(`[dsh-code] nazwa gałęzi ${phoneId}: ${describe(error)}`) }
+    await remote(device, `/links/${link.linkId}`, { method: 'DELETE' })
+    linkState.delete(phoneId)
+    console.log(`[dsh-code] rozjazd z ${device.name}: komputer przejął pisanie bez telefonu, a telefon miał nieoddane tury — sesja ${phoneId} została gałęzią „${branchTitle}”, powiązanie odłączone`)
+  }
+
+  async function syncLinks() {
+    if (!SYNC_ENABLED || syncing) return
+    syncing = true
+    try {
+      const seen = new Set()
+      for (const device of data.devices) {
+        if (!(await supportsSync(device))) continue
+        let links
+        try { ({ links } = await remote(device, '/links', { timeoutMs: 15000 })); reachability(device, '/links') } catch (error) { reachability(device, '/links', error); continue }
+        for (const link of Array.isArray(links) ? links : []) {
+          const since = missing.get(link.phoneSessionId)
+          if (since && Date.now() - since < MISSING_RETRY_MS) continue
+          seen.add(link.phoneSessionId)
+          try { await syncOne(device, link); missing.delete(link.phoneSessionId) } catch (error) {
+            if (/not found|Nie ma sesji/i.test(describe(error)) && !/na \S+\.$/.test(describe(error))) {
+              if (!missing.has(link.phoneSessionId)) console.log(`[dsh-code] pomijam powiązanie ${link.linkId} z ${device.name}: sesji ${link.phoneSessionId} nie ma na telefonie (sprawdzę ponownie za ${MISSING_RETRY_MS / 60000} min)`)
+              missing.set(link.phoneSessionId, Date.now())
+              linkState.delete(link.phoneSessionId)
+              continue
+            }
+            const s = linkState.get(link.phoneSessionId)
+            if (s) s.error = describe(error)
+            console.log(`[dsh-code] synchronizacja sesji ${link.phoneSessionId} z ${device.name}: ${describe(error)}`)
+          }
+        }
+      }
+      for (const id of [...linkState.keys()]) if (!seen.has(id)) linkState.delete(id)   // odłączone (np. na PC)
+      lastFullSync = Date.now()
+    } finally { syncing = false }
+  }
+
+  // Koniec tury w powiązanej sesji telefonu: wyślij od razu (po chwili na samodzielne zdarzenia po turn/end), bez czekania na obieg.
+  ctx.on?.('session/event', (session, event) => {
+    const id = session?.header?.id ?? session?.id
+    if (event?.type !== 'turn/end' || !linkState.has(id)) return
+    dirty.add(id)
+    clearTimeout(kick)
+    kick = setTimeout(() => { syncLinks().catch((e) => console.log(`[dsh-code] synchronizacja: ${e.message}`)) }, 1500)
+  })
+  ctx.effect(() => {
+    // Z powiązaniami co SYNC_POLL_MS (tury PC → telefon), bez nich co SYNC_IDLE_MS.
+    const timer = setInterval(() => {
+      if (linkState.size === 0 && Date.now() - lastFullSync < SYNC_IDLE_MS) return
+      syncLinks().catch((e) => console.log(`[dsh-code] synchronizacja: ${e.message}`))
+    }, SYNC_POLL_MS)
+    timer.unref?.()
+    return () => { clearInterval(timer); clearTimeout(kick) }
+  }, 'dsh-code: synchronizacja powiązanych sesji')
+
+  /** Przejęcie pisania na telefonie: najpierw dociągnięcie ostatnich zakończonych tur z PC, potem zmiana właściciela na PC. */
+  async function claimOnPhone(linkId) {
+    const entry = [...linkState.entries()].find(([, v]) => v.linkId === linkId)
+    if (!entry) throw Object.assign(new Error('Nie ma takiego powiązania.'), { status: 404 })
+    const [phoneId, s] = entry
+    const device = data.devices.find((d) => d.id === s.deviceId)
+    if (!device) throw Object.assign(new Error('Komputer tego powiązania nie jest już na liście.'), { status: 409 })
+    while (syncing) await new Promise((r) => setTimeout(r, 200))
+    syncing = true
+    try {
+      const fresh = async () => ((await remote(device, '/links', { timeoutMs: 15000 })).links ?? []).find((l) => l.linkId === linkId)
+      let link = await fresh()
+      if (!link) throw Object.assign(new Error('Powiązanie zostało odłączone.'), { status: 409 })
+      if (link.owner === 'phone') return { owner: 'phone' }
+      await syncOne(device, link)
+      link = await fresh()
+      const st = await sessionState((service) => ctx.get(service), phoneId)
+      const res = await remoteFetch(device, `/links/${linkId}/claim`, { method: 'POST', body: JSON.stringify({ epoch: link.epoch, phoneLast: st.lastSeq }) })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw Object.assign(new Error(body.error ?? `HTTP ${res.status}`), { status: 409 })
+      Object.assign(linkState.get(phoneId) ?? s, { owner: body.owner, claim: null, epoch: body.epoch, error: null })   // syncOne mógł podmienić wpis
+      // Nowy właściciel: licznik tur agenta telefonu = ostatnia tura w logu, zanim przyjmie pierwszą turę.
+      const reload = tryReload(phoneId)
+      if (reload.error) throw Object.assign(new Error(`Przejęto pisanie, ale wyrównanie licznika tur nie powiodło się: ${reload.error}`), { status: 409 })
+      console.log(`[dsh-code] telefon przejął pisanie sesji ${phoneId} od ${device.name} [epoch ${body.epoch}]`)
+      return { owner: body.owner }
+    } finally { syncing = false }
+  }
+
+  async function unlink(linkId) {
+    const entry = [...linkState.entries()].find(([, v]) => v.linkId === linkId)
+    if (!entry) throw Object.assign(new Error('Nie ma takiego powiązania.'), { status: 404 })
+    const device = data.devices.find((d) => d.id === entry[1].deviceId)
+    if (device) await remote(device, `/links/${linkId}`, { method: 'DELETE' })
+    linkState.delete(entry[0])
+    return { removed: true }
+  }
+
+  /** reloadSession sesji telefonu; błąd zwracany jako `{ error }` zamiast wyjątku. */
+  function tryReload(phoneId) {
+    try { return reloadSession((service) => ctx.get(service), phoneId) } catch (error) { return { error: describe(error) } }
+  }
+
+  /** „Wznów synchronizację”: wyrównanie licznika tur po stronie telefonu, potem zdjęcie wstrzymania na PC (które wyrównuje PC). */
+  async function resumeLink(linkId) {
+    const entry = [...linkState.entries()].find(([, v]) => v.linkId === linkId)
+    if (!entry) throw Object.assign(new Error('Nie ma takiego powiązania.'), { status: 404 })
+    const [phoneId, s] = entry
+    const device = data.devices.find((d) => d.id === s.deviceId)
+    if (!device) throw Object.assign(new Error('Komputer tego powiązania nie jest już na liście.'), { status: 409 })
+    const reload = tryReload(phoneId)
+    if (reload.error) throw Object.assign(new Error(reload.error), { status: 409 })
+    const res = await remoteFetch(device, `/links/${linkId}/resume`, { method: 'POST' })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw Object.assign(new Error(body.error ?? `HTTP ${res.status}`), { status: 409 })
+    Object.assign(s, { paused: null, error: null })
+    console.log(`[dsh-code] wznowiono synchronizację sesji ${phoneId} z ${device.name}`)
+    return { resumed: true }
+  }
+
+  // Bramka tury PRZED zapisem `turn/start` (agent/status: running jest emitowane synchronicznie, zanim turn() cokolwiek
+  // zapisze; agent/pre-step jest po turn/start, więc za późno): lustro — tura przerwana; właściciel — tura z numerem
+  // innym niż ostatni w logu przerwana z zachowaniem wiadomości w kolejce, licznik wyrównany (guardTurnStart z sync.js).
+  ctx.on?.('agent/status', (payload) => {
+    const stopped = guardTurnStart((service) => ctx.get(service), payload, (id) => {
+      const owner = linkState.get(id)?.owner
+      return owner === 'phone' ? 'owner' : owner === 'pc' ? 'mirror' : undefined
+    })
+    if (!stopped || stopped.reason === 'mirror') return
+    const s = linkState.get(stopped.sessionId)
+    const message = stopped.reason === 'unknown'
+      ? 'nieznany stan agenta DSH (zmienione wnętrze DSH); tura przerwana'
+      : `tura przerwana: agent miał licznik tur ${stopped.actual}, a w logu jest ${stopped.expected} (licznik wyrównany, wiadomość czeka w kolejce)`
+    console.log(`[dsh-code] bramka tury w sesji ${stopped.sessionId}: ${message}`)
+    if (!s) return
+    Object.assign(s, { error: message, paused: { at: Date.now(), message: `Telefon: ${message}` } })
+    // Przerwana tura znaczy, że gdzieś zabrakło wyrównania licznika: wstrzymanie widoczne po obu stronach (dsh-remote-control 79ce65b).
+    const device = data.devices.find((d) => d.id === s.deviceId)
+    if (device) {
+      remote(device, `/links/${s.linkId}/pause`, { method: 'POST', body: JSON.stringify({ message }) })
+        .then(() => console.log(`[dsh-code] wstrzymano synchronizację sesji ${stopped.sessionId} (zgłoszone do ${device.name})`))
+        .catch((error) => console.log(`[dsh-code] zgłoszenie wstrzymania do ${device.name}: ${describe(error)}`))
+    }
+  })
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
@@ -301,7 +575,11 @@ export function apply(ctx) {
       const route = `${req.method} ${url.pathname.slice(PREFIX.length)}`
       try {
         if (route === 'GET /state') return send(res, 200, await state())
-        if (route === 'GET /transfer') return send(res, 200, { targets: (await transferTargets()).map((d) => ({ id: d.id, name: d.name })), received })
+        if (route === 'GET /transfer') return send(res, 200, { targets: (await transferTargets()).map((d) => ({ id: d.id, name: d.name })), received, links: [...linkState.entries()].map(([phoneSessionId, v]) => ({ phoneSessionId, ...v })) })
+        const lm = /^\/links\/([0-9a-f-]{36})(\/claim|\/resume)?$/.exec(url.pathname.slice(PREFIX.length))
+        if (lm && req.method === 'POST' && lm[2] === '/claim') return send(res, 200, await claimOnPhone(lm[1]))
+        if (lm && req.method === 'POST' && lm[2] === '/resume') return send(res, 200, await resumeLink(lm[1]))
+        if (lm && req.method === 'DELETE' && !lm[2]) return send(res, 200, await unlink(lm[1]))
         if (route === 'POST /export') return send(res, 200, await exportToComputer(await readJson(req)))
         if (route === 'POST /devices') return send(res, 200, await addDevice(await readJson(req)))
         if (req.method === 'DELETE' && url.pathname.startsWith(`${PREFIX}/devices/`)) return send(res, 200, await removeDevice(decodeURIComponent(url.pathname.slice(`${PREFIX}/devices/`.length))))

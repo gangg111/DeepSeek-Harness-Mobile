@@ -1,6 +1,6 @@
 # DSH Mobile 1.2.0
 
-**DeepSeek Harness 0.2.0-rc.2 · versionCode 55 · payload 36 · arm64 · ok. 620 MB**
+**DeepSeek Harness 0.2.0-rc.2 · versionCode 60 · payload 41 · arm64 · ok. 620 MB**
 
 *English summary: DeepSeek Harness upgraded from 0.1.5-rc.3 to **0.2.0-rc.2**; the UI is rendered 1.2× larger on the phone and the Android status/navigation bars follow the page background. Also: (plugin manager, automation tasks, voice input, sidebar terminal and browser, Office/Excel previews, agent teams, keyboard shortcuts…). The Polish language pack now covers all **2446 strings** (1369 new). Two Android-specific fixes make 0.2.0 run on the phone: `koffi` pinned by dsh has no android-arm64 binary (resolved with an `overrides` to the newest 3.x that has one) and the new native `node-addon-require-builtin` has no Android variant (replaced by a JS package working under `--expose-internals`). The in-app updater applies both automatically and remembers a failed update instead of offering the same version again. Two community plugins (`dsh-memory-connect`, `dsh-reverse-skill`) are disabled by dsh 0.2.0 itself as incompatible.*
 
@@ -29,6 +29,17 @@
 
 - Nieudana sonda komputera jest ponawiana po 30 s, 2 min i 10 min, potem dopiero po zmianie stanu online urządzenia; log podaje numer próby i czas trwania sondy.
 - Lista urządzeń z tailnetu sprawdzana co sekundę do pierwszej niepustej (zaraz po `Running` bywa pusta), potem co 30 s.
+
+## Build 60 (payload 41)
+
+- **Synchronizacja sesji telefon ⇄ komputer na żywo.** Sesja wysłana ikoną staje się powiązana: właściciel pisze, druga strona jest lustrem tylko do odczytu (kłódka przy sesji, pasek nad polem pisania), a zakończone tury przechodzą w kilka sekund — tylko nowe zdarzenia, nie cała sesja. „Przejmij pisanie tutaj” przenosi pisanie na telefon, komputer może je odebrać z powrotem.
+- Bez rozjazdu logów: po każdym dopisaniu tur i przy przejęciu licznik tur agenta jest wyrównywany do logu, a bramka przed startem tury przerywa turę w lustrze albo z błędnym numerem, zanim cokolwiek trafi do logu (wtedy synchronizacja jest wstrzymywana po obu stronach, przycisk „Wznów synchronizację”).
+- Gdy komputer przejmie pisanie bez telefonu, a telefon ma nieoddane tury, sesja telefonu zostaje osobną gałęzią — nic nie jest nadpisywane.
+- Wymaga wtyczki dsh-remote-control 0.3.2+ na PC; włączone tylko na sprawdzonej wersji DSH (0.2.0-rc.2).
+
+## Build 56 (payload 37)
+
+- **Logowanie kontem DeepSeek (Google / e-mail)** jak w aplikacji desktopowej: Ustawienia → konto DeepSeek → zaloguj → „Otwórz” otwiera stronę logowania w przeglądarce, po zalogowaniu wracasz do apki. Działają wtedy modele `deepseek-account/…`, także w sesjach przeniesionych z komputera, który używa logowania kontem.
 
 ## Build 55 (payload 36)
 
@@ -117,4 +128,4 @@ Aktualizacja z 1.1.0 bez odinstalowania (ten sam klucz). Pierwszy start rozpakow
 
 ## Sumy kontrolne
 
-`dsh-mobile.apk` — md5 `87bc03e1244426fdb14d296d8969502e` (plik `dsh-mobile.apk.md5`).
+`dsh-mobile.apk` — md5 `bef9554e3e9f96c5bea085e00ff78263` (plik `dsh-mobile.apk.md5`).

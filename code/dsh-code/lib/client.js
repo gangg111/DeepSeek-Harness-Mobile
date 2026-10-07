@@ -225,52 +225,109 @@ window.__ModuleLoader__.load({
     // z dsh-remote-control na PC). Serwer (POST /api/dsh-code/export) robi natywny eksport sesji i wysyła ją do bramy
     // komputera; ikona jest ukryta, gdy żaden komputer nie zgłasza obsługi przenoszenia (GET /api/dsh-code/transfer).
     const XFER_COPY = {
-      pl: { send: 'Eksportuj na komputer', sending: 'Wysyłanie na komputer…', done: 'Wysłano na komputer', failed: 'Nie udało się wysłać sesji na komputer' },
-      en: { send: 'Export to computer', sending: 'Sending to the computer…', done: 'Sent to the computer', failed: 'Could not send the session to the computer' },
+      pl: {
+        send: 'Eksportuj na komputer', sending: 'Wysyłanie na komputer…', done: 'Wysłano na komputer', failed: 'Nie udało się wysłać sesji na komputer',
+        ownerHere: 'Synchronizowane z komputerem, piszesz tutaj (dotknij, aby odłączyć)', mirror: 'Lustro sesji z komputera, tylko do odczytu (dotknij, aby odłączyć)',
+        diverged: 'Synchronizacja wstrzymana (dotknij, aby odłączyć)', unlinkConfirm: 'Odłączyć synchronizację tej sesji? Obie kopie zostaną, ale przestaną się aktualizować.',
+        blocked: 'Ta sesja jest lustrem rozmowy z komputera. Przejmij pisanie, aby kontynuować tutaj.',
+        bannerMirror: 'Lustro sesji z komputera: nowe tury pojawiają się tu same.', claim: 'Przejmij pisanie tutaj', claimFailed: 'Nie udało się przejąć pisania',
+        paused: 'Synchronizacja wstrzymana', resume: 'Wznów synchronizację', resumeFailed: 'Nie udało się wznowić synchronizacji',
+      },
+      en: {
+        send: 'Export to computer', sending: 'Sending to the computer…', done: 'Sent to the computer', failed: 'Could not send the session to the computer',
+        ownerHere: 'Synced with the computer, you write here (tap to unlink)', mirror: 'Mirror of the computer session, read-only (tap to unlink)',
+        diverged: 'Sync paused (tap to unlink)', unlinkConfirm: 'Unlink sync for this session? Both copies stay but stop updating.',
+        blocked: 'This session mirrors a conversation on the computer. Take over writing to continue here.',
+        bannerMirror: 'Mirror of the computer session: new turns appear here on their own.', claim: 'Take over writing here', claimFailed: 'Could not take over writing',
+        paused: 'Sync paused', resume: 'Resume sync', resumeFailed: 'Could not resume sync',
+      },
     }
     const xferCopy = () => ((document.documentElement.lang || '').toLowerCase().startsWith('pl') ? XFER_COPY.pl : XFER_COPY.en)
+    /** Wspólny stan: komputery do eksportu + powiązania sesji telefonu (synchronizacja), z GET /api/dsh-code/transfer. */
     const transferStore = (() => {
-      let targets = []
+      let state = { targets: [], links: new Map() }
+      let raw = ''
       const listeners = new Set()
       let timer = null
       async function refresh() {
         try {
           const res = await fetch('/api/dsh-code/transfer', { credentials: 'same-origin', cache: 'no-store' })
           if (!res.ok) { console.warn(`[dsh-code] transfer: HTTP ${res.status}`); return }
-          const next = (await res.json()).targets ?? []
-          if (JSON.stringify(next) !== JSON.stringify(targets)) {
-            console.log(`[dsh-code] komputery do eksportu: ${next.map((d) => d.name).join(', ') || 'brak'}`)
-            targets = next; for (const l of listeners) l()
+          const body = await res.json()
+          const next = JSON.stringify([body.targets ?? [], body.links ?? []])
+          if (next !== raw) {
+            if (JSON.stringify(body.targets ?? []) !== JSON.stringify(state.targets)) console.log(`[dsh-code] komputery do eksportu: ${(body.targets ?? []).map((d) => d.name).join(', ') || 'brak'}`)
+            raw = next
+            state = { targets: body.targets ?? [], links: new Map((body.links ?? []).map((l) => [l.phoneSessionId, l])) }
+            for (const l of listeners) l()
           }
         } catch (error) { console.warn(`[dsh-code] transfer: ${error}`) }
       }
       return {
+        refresh,
         subscribe(listener) {
           listeners.add(listener)
-          // Dopóki serwer nie zna komputerów (pierwsze sprawdzenie /info trwa kilka sekund), pytamy co 3 s, potem co 30 s.
-          if (listeners.size === 1) { const tick = () => { void refresh().finally(() => { if (listeners.size > 0) timer = window.setTimeout(tick, targets.length ? 30000 : 3000) }) }; tick() }
+          // Bez znanych komputerów co 3 s (pierwsze /info trwa kilka sekund), z powiązaniami co 5 s, inaczej co 30 s.
+          if (listeners.size === 1) { const tick = () => { void refresh().finally(() => { if (listeners.size > 0) timer = window.setTimeout(tick, !state.targets.length ? 3000 : state.links.size ? 5000 : 30000) }) }; tick() }
           return () => { listeners.delete(listener); if (listeners.size === 0 && timer !== null) { window.clearTimeout(timer); timer = null } }
         },
-        snapshot: () => targets,
+        snapshot: () => state,
       }
     })()
+    const useTransfer = () => React.useSyncExternalStore(transferStore.subscribe, transferStore.snapshot)
+    const linkStateOf = (link) => (link.diverged || link.paused ? 'diverged' : link.owner === 'phone' ? 'owner' : 'mirror')
 
-    /** Komputer ze strzałką w górę (wyślij), ten sam komputer z haczykiem (wysłano). */
+    /** Komputer: strzałka w górę (wyślij), haczyk (wysłano), dwie strzałki (piszesz tutaj), kłódka (lustro), wykrzyknik (wstrzymane). */
     function ComputerIcon({ state }) {
       const common = { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
       const screen = h('rect', { x: 1.5, y: 2.5, width: 13, height: 9, rx: 1.4 })
       const stand = h('path', { d: 'M5.5 14h5M8 11.5V14' })
-      const mark = state === 'done' ? h('path', { d: 'M5.6 7l1.6 1.6 3.2-3.3' }) : h('path', { d: 'M8 9.2V4.8M5.9 6.8L8 4.7l2.1 2.1' })
-      return h('svg', common, screen, stand, mark)
+      const marks = {
+        done: 'M5.6 7l1.6 1.6 3.2-3.3',
+        owner: 'M5.2 6.2h5.2l-1.4-1.3M10.8 7.8H5.6l1.4 1.3',
+        mirror: 'M6.2 7.4h3.6v2.4H6.2zM6.9 7.4V6.5a1.1 1.1 0 0 1 2.2 0v.9',
+        diverged: 'M8 4.6v3M8 9.4v.1',
+      }
+      return h('svg', common, screen, stand, h('path', { d: marks[state] ?? 'M8 9.2V4.8M5.9 6.8L8 4.7l2.1 2.1' }))
+    }
+
+    function rowButton({ label, state, busy, onClick, hover, setHover }) {
+      const accent = state === 'busy' || state === 'done' || state === 'owner'
+      const color = state === 'diverged' ? 'var(--dsw-alias-state-error-primary, #e5484d)' : accent ? 'var(--dsw-alias-state-business-primary)' : hover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)'
+      return h('button', {
+        type: 'button', title: label, 'aria-label': label, 'aria-busy': busy, onClick,
+        onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false),
+        style: {
+          flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 16, height: 16, padding: 0, border: 'none', borderRadius: 'var(--dsw-radius-xs)',
+          background: 'transparent', cursor: busy ? 'progress' : 'pointer', color, opacity: busy ? 0.5 : 1,
+        },
+      }, h(ComputerIcon, { state }))
     }
 
     function ExportToComputerButton({ sessionId }) {
-      const targets = React.useSyncExternalStore(transferStore.subscribe, transferStore.snapshot)
+      const { targets, links } = useTransfer()
       const [state, setState] = useState('idle')
       const [hover, setHover] = useState(false)
-      if (targets.length === 0) return null
+      const link = links.get(sessionId)
       const c = xferCopy()
-      const label = (state === 'busy' ? c.sending : state === 'done' ? c.done : c.send) + (targets.length ? ` (${targets[0].name})` : '')
+      if (link) {
+        const ls = linkStateOf(link)
+        const label = (ls === 'owner' ? c.ownerHere : ls === 'mirror' ? c.mirror : c.diverged) + ` — ${link.deviceName}${link.error ? `: ${link.error}` : ''}`
+        const onClick = async (event) => {
+          event.preventDefault(); event.stopPropagation()
+          if (state === 'busy' || !window.confirm(c.unlinkConfirm)) return
+          setState('busy')
+          try {
+            const res = await fetch(`/api/dsh-code/links/${link.linkId}`, { method: 'DELETE', credentials: 'same-origin' })
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
+            await transferStore.refresh()
+          } catch (error) { window.alert(error.message) } finally { setState('idle') }
+        }
+        return rowButton({ label, state: state === 'busy' ? 'busy' : ls, busy: state === 'busy', onClick, hover, setHover })
+      }
+      if (targets.length === 0) return null
+      const label = (state === 'busy' ? c.sending : state === 'done' ? c.done : c.send) + ` (${targets[0].name})`
       async function onClick(event) {
         event.preventDefault(); event.stopPropagation()
         if (state === 'busy') return
@@ -280,25 +337,66 @@ window.__ModuleLoader__.load({
           const body = await res.json().catch(() => ({}))
           if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
           setState('done'); window.setTimeout(() => setState('idle'), 4000)
+          void transferStore.refresh()
         } catch (error) {
           setState('idle')
           window.alert(`${c.failed}: ${error.message}`)
         }
       }
-      const color = state === 'busy' || state === 'done' ? 'var(--dsw-alias-state-business-primary)' : hover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)'
-      return h('button', {
-        type: 'button', title: label, 'aria-label': label, 'aria-busy': state === 'busy', onClick,
-        onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false),
-        style: {
-          flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 16, height: 16, padding: 0, border: 'none', borderRadius: 'var(--dsw-radius-xs)',
-          background: 'transparent', cursor: state === 'busy' ? 'progress' : 'pointer', color, opacity: state === 'busy' ? 0.5 : 1,
-        },
-      }, h(ComputerIcon, { state }))
+      return rowButton({ label, state, busy: state === 'busy', onClick, hover, setHover })
+    }
+
+    const sessionIdOf = (session) => session?.sessionId ?? session?.id ?? session?.header?.id
+
+    /** Pasek nad polem pisania w lustrze: informacja + „Przejmij pisanie tutaj” (dociągnięcie z PC, potem zmiana właściciela). */
+    function MirrorBanner({ session }) {
+      const { links } = useTransfer()
+      const link = links.get(sessionIdOf(session))
+      const [busy, setBusy] = useState(false)
+      if (!link || (link.owner !== 'pc' && !link.paused)) return null
+      const c = xferCopy()
+      async function act(path, failed) {
+        setBusy(true)
+        try {
+          const res = await fetch(`/api/dsh-code/links/${link.linkId}/${path}`, { method: 'POST', credentials: 'same-origin' })
+          const body = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
+          await transferStore.refresh()
+        } catch (error) { window.alert(`${failed}: ${error.message}`) } finally { setBusy(false) }
+      }
+      const claim = () => act('claim', c.claimFailed)
+      const resume = () => act('resume', c.resumeFailed)
+      return h('div', {
+        role: 'status',
+        style: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', marginBottom: 8, borderRadius: 'var(--dsw-radius-md, 10px)', fontSize: 13, color: 'var(--dsw-alias-label-secondary)', background: 'var(--dsw-alias-fill-secondary, transparent)', border: '1px solid var(--dsw-alias-border-secondary, transparent)' },
+      },
+      h(ComputerIcon, { state: link.diverged || link.paused ? 'diverged' : 'mirror' }),
+      h('span', { style: { flex: 1 } }, link.paused ? `${c.paused}: ${link.paused.message}` : link.diverged ? link.error : c.bannerMirror),
+      link.diverged ? null : h('button', {
+        type: 'button', disabled: busy, onClick: link.paused ? resume : claim,
+        style: { flex: 'none', padding: '4px 10px', borderRadius: 'var(--dsw-radius-sm, 6px)', cursor: busy ? 'progress' : 'pointer', font: 'inherit', fontSize: 13, border: 'none', background: 'var(--dsw-alias-state-business-primary)', color: 'var(--dsw-alias-label-on-color, #fff)' },
+      }, link.paused ? c.resume : c.claim))
+    }
+
+    /** Blokada pola pisania dla luster (jak na PC: conversation.blocks), podnoszona i zdejmowana ze stanem powiązań. */
+    function syncComposerBlocks(ctx) {
+      const blocked = new Set()
+      const apply = () => {
+        const blocks = ctx.conversation?.blocks
+        if (!blocks) return
+        const now = new Set()
+        for (const [id, link] of transferStore.snapshot().links) if (link.owner === 'pc') now.add(id)
+        for (const id of now) if (!blocked.has(id)) blocks.set(id, { reason: xferCopy().blocked })
+        for (const id of blocked) if (!now.has(id)) blocks.set(id, undefined)
+        blocked.clear()
+        for (const id of now) blocked.add(id)
+      }
+      const unsubscribe = transferStore.subscribe(apply)
+      ctx.effect(() => () => { unsubscribe(); for (const id of blocked) ctx.conversation?.blocks?.set(id, undefined) }, 'dsh-code: blokady luster')
     }
 
     return {
-      inject: ['slots', 'locale', 'layout'],
+      inject: ['slots', 'locale', 'layout', 'conversation'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { en, zh: en }), 'dsh-code: locale en/zh')
         ctx.effect(() => ctx.locale.register(NS, 'pl', pl), 'dsh-code: locale pl')
@@ -308,6 +406,8 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL, order: 5, label: () => t('code'), locale: NS }, CodeIcon))
         try {
           ctx.slots.inject('sidebar.workspaces.session.row.action', () => ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'dsh-code.export-to-computer', order: 50 }, ExportToComputerButton))
+          ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'dsh-code.mirror-banner', order: 50 }, MirrorBanner))
+          syncComposerBlocks(ctx)
         } catch (error) { console.error(`[dsh-code] slot ikony: ${error?.stack ?? error}`) }
       },
     }

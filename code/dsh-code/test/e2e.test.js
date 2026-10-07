@@ -51,7 +51,7 @@ async function phone() {
   let allowed = true
   const ctx = {
     webServer: { register(route) { handler = route.handler; return () => {} } },
-    connection: { admit: () => (allowed ? { peer: {} } : { rejection: 401 }) },
+    connection: { requestRejection: () => (allowed ? undefined : 401) },   // DSH 0.2: admit() zastąpione przez requestRejection()
     effect(fn) { fn() },
   }
   apply(ctx)

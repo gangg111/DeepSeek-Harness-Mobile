@@ -1,4 +1,4 @@
-// Kopia bez zmian z gangg111/dsh-remote-control@c659179 lib/transfer.js (wspólny moduł przenoszenia sesji telefon ⇄ komputer). Aktualizować kopiując ponownie.
+// Kopia bez zmian z gangg111/dsh-remote-control@306b380 lib/transfer.js (wspólne moduły przenoszenia i synchronizacji sesji telefon ⇄ komputer). Aktualizować kopiując ponownie.
 /**
  * Przenoszenie sesji miedzy instalacjami DSH (telefon <-> komputer) na natywnym eksporcie DSH.
  *
@@ -198,8 +198,16 @@ export async function importSession(get, zip, options = {}) {
       throw new TransferError(422, `DSH nie przyjal tej sesji (${error?.message ?? error}). Wersje DSH po obu stronach sa pewnie rozne.`)
     }
   }
-  const ws = typeof registry.resolveByPath === 'function' ? await registry.resolveByPath(cwd) : undefined
-  await (ws ?? workspace).attachSession?.(id)
+  // Pasek boczny pokazuje sesje obszaru z jego listy `sessionIds`; bez przypiecia sesja jest tylko w liscie API.
+  let attached = false
+  try {
+    const ws = (typeof registry.resolveByPath === 'function' ? await registry.resolveByPath(cwd) : undefined) ?? workspace
+    if (typeof ws?.attachSession !== 'function') throw new Error(`obszar ${cwd} nie ma metody attachSession`)
+    await ws.attachSession(id)
+    attached = true
+  } catch (error) {
+    options.log?.warn?.(`[dsh-remote-control] przypiecie importu do obszaru: ${error?.message ?? error}`)
+  }
   options.emit?.('api-session/added', { sessionId: id, updatedAt: Date.now(), agentAvailable: false, running: false, blank: false, cwd })
   // Lista bierze tytul nieotwieranej sesji z cache projekcji, ktory powstaje dopiero dla sesji aktywnej.
   // Oficjalna zmiana nazwy najpierw wznawia sesje (projekcje sa liczone), potem utrwala tytul.
@@ -213,7 +221,7 @@ export async function importSession(get, zip, options = {}) {
   } catch (error) {
     options.log?.warn?.(`[dsh-remote-control] model importu: ${error?.message ?? error}`)
   }
-  return { sessionId: id, title, events: events.length, attachments: map.size, skippedSubagents: parsed.subagents, modelChanged }
+  return { sessionId: id, title, events: events.length, attachments: map.size, skippedSubagents: parsed.subagents, modelChanged, attached, workspaceId: workspace.id ?? null }
 }
 
 /**
