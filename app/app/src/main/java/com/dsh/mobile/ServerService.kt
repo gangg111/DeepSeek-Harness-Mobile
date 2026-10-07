@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.os.IBinder
 import java.io.File
 
@@ -21,6 +22,7 @@ class ServerService : Service() {
         const val ACTION_STOP = "com.dsh.mobile.STOP"
         const val ACTION_UPDATE = "com.dsh.mobile.UPDATE"
         const val ACTION_REPOST = "com.dsh.mobile.REPOST"
+        const val ACTION_INSTALL_STATUS = "com.dsh.mobile.INSTALL_STATUS"
         /** Wydania APK: gdy aktualizator w apce nie poradzi sobie z nową wersją dsh, user ma stąd pobrać nową apkę. */
         const val RELEASES_URL = "https://github.com/gangg111/DeepSeek-Harness-Mobile/releases"
         @Volatile var updateFailed = false
@@ -29,6 +31,10 @@ class ServerService : Service() {
         @Volatile var stopRequested = false
         @Volatile var updating = false
         @Volatile var availableVersion: String? = null
+        /** Nowsze APK z wydań na GitHubie (pierwszeństwo przed dsh z npm). */
+        @Volatile var availableApk: ApkUpdater.Release? = null
+        /** Systemowe potwierdzenie instalacji pobranego APK (z usługi w tle nie wolno go otworzyć samemu). */
+        @Volatile var installIntent: PendingIntent? = null
         @Volatile var instance: ServerService? = null
 
         fun start(ctx: Context) {
@@ -58,6 +64,7 @@ class ServerService : Service() {
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_UPDATE) { runUpdate(); return START_STICKY }
+        if (intent?.action == ACTION_INSTALL_STATUS) { onInstallStatus(intent); return START_STICKY }
         // Użytkownik zmiótł powiadomienie (gest / „Wyczyść"): wystawiamy je od nowa, usługa działa dalej.
         if (intent?.action == ACTION_REPOST) { startForeground(NOTIF_ID, notification(lastText)); return START_STICKY }
         startForeground(NOTIF_ID, notification(lastText))
@@ -94,12 +101,31 @@ class ServerService : Service() {
         super.onDestroy()
     }
 
-    /** Aktualizacja dsh w apce: zatrzymuje serwer, odpala android-update.mjs (npm z payloadu), potem pętla restartuje serwer. */
+    /**
+     * Przycisk „Aktualizuj”: najpierw nowsze APK z wydań na GitHubie (ApkUpdater), a dopiero gdy go nie ma (albo GitHub nie odpowiada)
+     * aktualizacja dsh w apce: zatrzymuje serwer, odpala android-update.mjs (npm z payloadu), potem pętla restartuje serwer.
+     */
     private fun runUpdate() {
         if (updating) return
         updating = true
         val app = application as App
         Thread {
+            val apk = try { ApkUpdater.newer(app) } catch (e: Throwable) { app.log("apk: sprawdzenie GitHuba nie powiodło się: $e"); null }
+            if (apk != null) {
+                // Serwer działa dalej w trakcie pobierania; instalacja i tak zastąpi proces apki.
+                try {
+                    availableApk = apk
+                    val label = "DSH Mobile ${apk.versionName}"
+                    app.log("apk: pobieram $label (versionCode ${apk.versionCode}, ${apk.size} B)")
+                    update("Pobieranie $label…")
+                    ApkUpdater.downloadAndCommit(app, apk) { done, total -> update("Pobieranie $label: ${done * 100 / maxOf(total, 1)}% (${done shr 20} z ${total shr 20} MB)") }
+                    app.log("apk: pobrano i sprawdzono md5, czekam na potwierdzenie instalacji")
+                    update("Pobrano $label (md5 zgodne). Potwierdź instalację — przycisk „Zainstaluj”.")
+                } catch (e: Throwable) {
+                    app.log("apk: błąd $e"); update("Aktualizacja apki nie powiodła się: ${e.message ?: e}. Spróbuj ponownie „Aktualizuj”.")
+                } finally { updating = false }
+                return@Thread
+            }
             try {
                 update("Aktualizacja: zatrzymuję serwer…")
                 App.process?.destroyForcibly(); App.url = null
@@ -123,11 +149,18 @@ class ServerService : Service() {
         }.start()
     }
 
-    /** Sprawdzenie w tle, czy npm ma nowszą wersję; wynik trafia do tekstu powiadomienia. */
+    /** Sprawdzenie w tle: najpierw nowsze APK na GitHubie, potem nowsza wersja dsh w npm; wynik trafia do tekstu powiadomienia. */
     fun checkForUpdate() {
         Thread {
             try {
                 val app = application as App
+                val apk = try { ApkUpdater.newer(app) } catch (e: Throwable) { app.log("apk: sprawdzenie GitHuba nie powiodło się: $e"); null }
+                if (apk != null) {
+                    availableApk = apk
+                    app.log("apk: dostępna ${apk.versionName} (versionCode ${apk.versionCode})")
+                    update("Dostępna nowa wersja DSH Mobile ${apk.versionName}. Otwórz powiadomienie → Aktualizuj.")
+                    return@Thread
+                }
                 val r = app.runUpdater(listOf("--tag", "latest", "--check")) {}
                 if (r.startsWith("available ")) {
                     availableVersion = r.removePrefix("available ")
@@ -139,6 +172,26 @@ class ServerService : Service() {
                 }
             } catch (_: Throwable) {}
         }.start()
+    }
+
+    /** Wynik sesji PackageInstaller: prośba o potwierdzenie, sukces albo błąd. */
+    private fun onInstallStatus(intent: Intent) {
+        val app = application as App
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+        app.log("apk: status instalacji $status ${message ?: ""}")
+        when (status) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                @Suppress("DEPRECATION") val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                installIntent = PendingIntent.getActivity(this, 6, confirm, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                // Gdy apka jest na wierzchu, system pozwoli otworzyć okno od razu; w tle zostaje przycisk w powiadomieniu.
+                try { startActivity(confirm) } catch (e: Throwable) { app.log("apk: okno instalacji tylko z powiadomienia ($e)") }
+                update("Nowa wersja DSH Mobile gotowa do instalacji — dotknij „Zainstaluj”.")
+            }
+            PackageInstaller.STATUS_SUCCESS -> { installIntent = null; availableApk = null; update("Zainstalowano nową wersję DSH Mobile.") }
+            else -> { installIntent = null; update("Instalacja nie powiodła się: ${message ?: status}. Spróbuj ponownie „Aktualizuj”.") }
+        }
     }
 
     fun update(text: String) {
@@ -161,8 +214,16 @@ class ServerService : Service() {
             .setOngoing(true)
             .setDeleteIntent(repost)
             .addAction(Notification.Action.Builder(null, "Zatrzymaj", stop).build())
-            .addAction(Notification.Action.Builder(null, if (availableVersion != null) "Aktualizuj do $availableVersion" else "Aktualizuj", upd).build())
-            .apply { if (updateFailed) addAction(Notification.Action.Builder(null, "Pobierz APK", releases).build()) }
+            .addAction(Notification.Action.Builder(null, when {
+                availableApk != null -> "Aktualizuj apkę do ${availableApk!!.versionName}"
+                availableVersion != null -> "Aktualizuj do $availableVersion"
+                else -> "Aktualizuj"
+            }, upd).build())
+            .apply {
+                val install = installIntent
+                if (install != null) addAction(Notification.Action.Builder(null, "Zainstaluj", install).build())
+                else if (updateFailed) addAction(Notification.Action.Builder(null, "Pobierz APK", releases).build())
+            }
             .setStyle(Notification.BigTextStyle().bigText(text))
             .build()
     }

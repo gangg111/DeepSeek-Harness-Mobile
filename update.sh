@@ -190,6 +190,9 @@ step_pack() {
   apksigner verify --print-certs "$out" | grep -m1 "Signer #1 certificate DN"
   cp -f "$out" /sdcard/Download/dsh-mobile.apk
   md5sum /sdcard/Download/dsh-mobile.apk | cut -d' ' -f1 > /sdcard/Download/dsh-mobile.apk.md5   # asset do wydania na GitHubie
+  # Metadane dla aktualizatora w apce (ApkUpdater): wydanie na GitHubie musi mieć ten plik obok APK; o nowości decyduje versionCode.
+  printf '{"versionCode":%s,"versionName":"%s","md5":"%s","size":%s}\n' "$vc" "$dshv+$pv" "$(cat /sdcard/Download/dsh-mobile.apk.md5)" \
+    "$(stat -c %s /sdcard/Download/dsh-mobile.apk)" > /sdcard/Download/dsh-mobile.json
   log "GOTOWE: /sdcard/Download/dsh-mobile.apk ($(du -k "$out" | cut -f1) KB, md5 $(md5sum "$out" | cut -c1-8))"
 }
 
