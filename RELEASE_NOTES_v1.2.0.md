@@ -1,6 +1,6 @@
 # DSH Mobile 1.2.0
 
-**DeepSeek Harness 0.2.0-rc.2 · versionCode 45 · payload 30 · arm64 · ok. 620 MB**
+**DeepSeek Harness 0.2.0-rc.2 · versionCode 46 · payload 30 · arm64 · ok. 620 MB**
 
 *English summary: DeepSeek Harness upgraded from 0.1.5-rc.3 to **0.2.0-rc.2**; the UI is rendered 1.2× larger on the phone and the Android status/navigation bars follow the page background. Also: (plugin manager, automation tasks, voice input, sidebar terminal and browser, Office/Excel previews, agent teams, keyboard shortcuts…). The Polish language pack now covers all **2446 strings** (1369 new). Two Android-specific fixes make 0.2.0 run on the phone: `koffi` pinned by dsh has no android-arm64 binary (resolved with an `overrides` to the newest 3.x that has one) and the new native `node-addon-require-builtin` has no Android variant (replaced by a JS package working under `--expose-internals`). The in-app updater applies both automatically and remembers a failed update instead of offering the same version again. Two community plugins (`dsh-memory-connect`, `dsh-reverse-skill`) are disabled by dsh 0.2.0 itself as incompatible.*
 
@@ -29,6 +29,11 @@
 
 - Nieudana sonda komputera jest ponawiana po 30 s, 2 min i 10 min, potem dopiero po zmianie stanu online urządzenia; log podaje numer próby i czas trwania sondy.
 - Lista urządzeń z tailnetu sprawdzana co sekundę do pierwszej niepustej (zaraz po `Running` bywa pusta), potem co 30 s.
+
+## Build 46 (payload 30)
+
+- Apka sprawdza aktualizacje przy każdym starcie serwera, przy powrocie do apki i w tle co 6 godzin (dotąd tylko raz po uruchomieniu procesu), z pominięciem bufora GitHuba — nowa wersja jest widoczna od razu po wydaniu.
+- Po pobraniu APK powiadomienie pokazuje tylko „Zainstaluj” (bez przycisku, który pobierał drugi raz); wywołanie aktualizacji w tym stanie otwiera okno instalacji.
 
 ## Build 45 (payload 30)
 
@@ -78,4 +83,4 @@ Aktualizacja z 1.1.0 bez odinstalowania (ten sam klucz). Pierwszy start rozpakow
 
 ## Sumy kontrolne
 
-`dsh-mobile.apk` — md5 `009c4146af586f3ba3b989234da4cb69` (plik `dsh-mobile.apk.md5`).
+`dsh-mobile.apk` — md5 `a4e65ab194916e15d6b4793376197e00` (plik `dsh-mobile.apk.md5`).
