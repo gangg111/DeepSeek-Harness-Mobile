@@ -11,12 +11,11 @@ import java.util.zip.ZipInputStream
 class App : Application() {
     companion object {
         const val TAG = "dsh"
-        const val PAYLOAD_VERSION = "29"
+        const val PAYLOAD_VERSION = "30"
         @Volatile var url: String? = null
         @Volatile var status: String = "start"
         @Volatile var process: Process? = null
         @Volatile var lastUpdateMessage: String? = null
-        @Volatile var updateChecked = false
         var onUrl: ((String) -> Unit)? = null
         var onStatus: ((String) -> Unit)? = null
     }
@@ -91,7 +90,7 @@ class App : Application() {
                 if (url == null && line.startsWith("dsh web:") && m != null) {
                     url = m.value; onUrl?.invoke(m.value)
                     setStatus("Serwer działa: port ${Regex(":(\\d+)/").find(m.value)?.groupValues?.get(1) ?: "?"}")
-                    if (!updateChecked) { updateChecked = true; ServerService.instance?.checkForUpdate() }
+                    ServerService.instance?.maybeCheckForUpdate()   // także po restarcie serwera w tym samym procesie
                 }
             }
         }

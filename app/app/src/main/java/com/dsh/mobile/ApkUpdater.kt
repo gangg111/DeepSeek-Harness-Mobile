@@ -25,10 +25,14 @@ object ApkUpdater {
         (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = timeoutMs; readTimeout = timeoutMs; instanceFollowRedirects = true
             setRequestProperty("User-Agent", "DSH-Mobile"); setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Cache-Control", "no-cache"); useCaches = false
         }
 
+    /** Parametr czasu omija bufor GitHuba (odpowiedź /releases/latest i link do assetu potrafią być nieaktualne 1–2 min po wgraniu). */
+    private fun fresh(url: String) = url + (if ('?' in url) "&" else "?") + "t=" + System.currentTimeMillis()
+
     private fun getText(url: String): String {
-        val c = open(url, 15000)
+        val c = open(fresh(url), 15000)
         try {
             if (c.responseCode != 200) throw IllegalStateException("HTTP ${c.responseCode} dla $url")
             return c.inputStream.bufferedReader().readText()

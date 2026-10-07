@@ -30,6 +30,7 @@ class ServerService : Service() {
         @Volatile var running = false
         @Volatile var stopRequested = false
         @Volatile var updating = false
+        @Volatile var periodicCheck = false
         @Volatile var availableVersion: String? = null
         /** Nowsze APK z wydań na GitHubie (pierwszeństwo przed dsh z npm). */
         @Volatile var availableApk: ApkUpdater.Release? = null
@@ -67,6 +68,10 @@ class ServerService : Service() {
             ctx.startService(Intent(ctx, ServerService::class.java).setAction(ACTION_UPDATE))
         }
         @Volatile var instance: ServerService? = null
+        /** Ostatnie sprawdzenie aktualizacji (GitHub, potem npm); sprawdzamy przy starcie serwera, powrocie do apki i co 6 h. */
+        @Volatile var lastCheckAt = 0L
+        const val CHECK_MIN_INTERVAL_MS = 30 * 60 * 1000L
+        const val CHECK_PERIOD_MS = 6 * 60 * 60 * 1000L
 
         fun start(ctx: Context) {
             stopRequested = false
@@ -99,6 +104,12 @@ class ServerService : Service() {
         // Użytkownik zmiótł powiadomienie (gest / „Wyczyść"): wystawiamy je od nowa, usługa działa dalej.
         if (intent?.action == ACTION_REPOST) { startForeground(NOTIF_ID, notification(lastText)); return START_STICKY }
         startForeground(NOTIF_ID, notification(lastText))
+        if (!periodicCheck) {
+            periodicCheck = true
+            Thread {
+                try { while (true) { Thread.sleep(CHECK_PERIOD_MS); maybeCheckForUpdate(CHECK_PERIOD_MS - 60_000L) } } catch (_: InterruptedException) {}
+            }.apply { isDaemon = true }.start()
+        }
         if (!running) {
             running = true
             Thread {
@@ -181,6 +192,14 @@ class ServerService : Service() {
             } catch (e: Throwable) { app.log("update error: $e"); update("Aktualizacja: błąd $e") }
             finally { updating = false }
         }.start()
+    }
+
+    /** Sprawdza aktualizacje, jeśli od ostatniego sprawdzenia minęło co najmniej [minIntervalMs] (i nic się teraz nie aktualizuje). */
+    fun maybeCheckForUpdate(minIntervalMs: Long = CHECK_MIN_INTERVAL_MS) {
+        val now = System.currentTimeMillis()
+        if (updating || installIntent != null || now - lastCheckAt < minIntervalMs) return
+        lastCheckAt = now
+        checkForUpdate()
     }
 
     /** Sprawdzenie w tle: najpierw nowsze APK na GitHubie, potem nowsza wersja dsh w npm; wynik trafia do tekstu powiadomienia. */

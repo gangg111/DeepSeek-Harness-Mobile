@@ -179,7 +179,7 @@ class MainActivity : Activity() {
         web.evaluateJavascript("""(function(){var z=$UI_ZOOM;var m=document.querySelector('meta[name=viewport]');if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}var w=Math.round(screen.width/z);var c='width='+w+', initial-scale='+z+', minimum-scale='+z+', maximum-scale='+z+', viewport-fit=cover';if(m.content!==c){m.content=c;}if(document.documentElement.style.zoom){document.documentElement.style.zoom='';}})()""", null)
     }
     private val barsTick = object : Runnable { override fun run() { applyZoom(); syncBars(); bars.postDelayed(this, 2000) } }
-    override fun onResume() { super.onResume(); if (!PLAIN_WEBVIEW) bars.post(barsTick) }
+    override fun onResume() { super.onResume(); if (!PLAIN_WEBVIEW) bars.post(barsTick); ServerService.instance?.maybeCheckForUpdate() }
     override fun onPause() { super.onPause(); bars.removeCallbacks(barsTick) }
 
     private var loadedUrl: String? = null
