@@ -28,12 +28,12 @@ Apka pakuje w jeden plik APK:
 - **pluginy społeczności**: mobilny UI (dsh-qol), pamięć między sesjami, cofanie tur z przywracaniem plików, bezpieczniki pętli (repeat-stop, tool-budget), 87 skilli inżynierii wstecznej, edycja plików diffem, zegar w kontekście, lista zadań między turami, most MCP po stdio, TTS (Edge TTS z polskimi głosami, równoległa synteza fragmentów),
 - **działający menedżer pluginów**: dzięki dołączonemu pnpm „Pluginy → Dodaj plugin” instaluje pluginy z npm i z GitHuba tak jak na komputerze; pokazują się w grupie „Zainstalowane” i tam można je odinstalować (pluginy wbudowane w APK działają dalej, ale nie są tam wymienione),
 - **usługę pierwszoplanową**, która trzyma serwer w tle (powiadomienie z przyciskami „Zatrzymaj" i „Aktualizuj"),
-- **aktualizator w apce**: wbudowany npm pobiera nową wersję dsh, nakłada łatki pod Androida z prekompilowanych plików, testuje start i dopiero wtedy podmienia katalog.
+- **aktualizator w apce** pod jednym przyciskiem „Aktualizuj” (w powiadomieniu albo niebieski przycisk na dole paska bocznego, jak w DSH Desktop): najpierw sprawdza wydania w tym repozytorium i gdy jest nowsze APK, pobiera je z postępem, sprawdza md5 i proponuje instalację; dopiero gdy nowszego APK nie ma, wbudowany npm pobiera nową wersję dsh, nakłada łatki pod Androida z prekompilowanych plików, testuje start i dopiero wtedy podmienia katalog.
 
 ## Instalacja
 
 1. Pobierz `dsh-mobile.apk` z [Releases](../../releases) (ok. 600 MB).
-2. Zezwól menedżerowi plików na instalację z nieznanych źródeł i zainstaluj.
+2. Zezwól menedżerowi plików na instalację z nieznanych źródeł i zainstaluj. Kolejne aktualizacje przychodzą już z apki; za pierwszym razem Android prosi o zgodę „Instaluj nieznane aplikacje” dla DeepSeek Harness.
 3. Pierwsze uruchomienie rozpakowuje ok. 1,3 GB (60 tys. plików) do pamięci apki. Trwa kilka minut, postęp widać na liczniku. Kolejne starty trwają kilka sekund.
 4. Zezwól na dostęp do plików: agent pracuje domyślnie w `Pobranych`, tam też apka zapisuje log (`Download/dsh_log.txt`).
 5. Wpisz klucz API DeepSeek w oknie powitalnym harnessu.
@@ -46,8 +46,9 @@ Wymagania: Android 9+ (targetSdk 28 celowo, patrz niżej), arm64, ok. 2 GB wolne
 - Język: Ustawienia → Ogólne → Język (domyślnie polski, gdy system jest polski).
 - Tryb uprawnień: apka ustawia `danger-full-access`, bo jądro Androida nie ma Landlocka ani bubblewrapa, a dsh w trybach z sandboxem odmawia uruchamiania komend. Procesy izoluje sam Android (katalog apki + pamięć współdzielona).
 - TTS: przycisk głośnika przy odpowiedzi, przełącznik „Czytaj automatycznie" w kompozytorze, ustawienia w Ustawienia → Pluginy → Głos. Domyślny głos `pl-PL-ZofiaNeural`, liczbę równoległych syntez ustawia `DSH_TTS_EDGE_PARALLEL` (domyślnie 30).
-- Aktualizacja dsh: powiadomienie → „Aktualizuj". Po starcie apka sprawdza npm i pokazuje dostępną wersję.
+- Aktualizacja: „Aktualizuj” w powiadomieniu albo niebieski przycisk na dole paska bocznego. Apka sprawdza aktualizacje (najpierw nowsze APK w wydaniach, potem nowsze dsh w npm) przy każdym otwarciu, także po „Zatrzymaj”, przy powrocie do apki (najwyżej co 30 min) i co 6 godzin. Po pobraniu „Zainstaluj” otwiera instalator systemowy.
 - Instalowanie pluginów: Pluginy → Dodaj plugin → Zainstaluj zewnętrzny plugin. Podawaj pełną nazwę z npm razem z zakresem (np. `@michengai/dsh-skills-manager`, a nie niezwiązany `dsh-skills-manager`) albo `github:właściciel/repo` dla pluginów wydanych tylko na GitHubie (np. `github:2002XiaoYu/dsh-session-diff`). dsh odrzuca pluginy, których autorzy deklarują zgodność tylko ze starszym dsh, i wtedy nic się nie instaluje.
+- Pluginy instalowane z menedżera są tłumaczone, gdzie się da: Sklep z pluginami i Zarchiwizowane sesje przez mechanizm językowy dsh, Cost (dsh-cost-meter) przez łatkę, którą apka nakłada przy każdym starcie i po każdej instalacji lub aktualizacji pluginu. Przy świeżej instalacji Cost pokazuje kwoty w USD; istniejąca instalacja zachowuje zapisaną walutę (Ustawienia → Cost → Wyświetlanie → Kwoty i waluta). Opisy pluginów w sklepie pochodzą od autorów i zostają w oryginale.
 - `AGENTS.md` z katalogu roboczego trafia do kontekstu modelu.
 - Interfejs jest powiększony 1,2× względem wersji przeglądarkowej (meta viewport: szerokość strony = ekran/1,2; stała `UI_ZOOM` w `MainActivity.kt`), a paski systemowe Androida przyjmują kolor tła strony.
 - Klawiatura w polach dsh działa bez podpowiedzi, autokorekty i pisania gestem (WebView zgłasza pole jako „widoczne hasło”): edytor kompozytora (Lexical) z klawiaturą składającą słowa, np. Samsung, zaznaczał pierwszą literę i nadpisywał ją następną (Lexical #7210). Bez składania słów błąd nie występuje.
@@ -64,8 +65,9 @@ APK
 │   ├── node_modules/            dsh + pluginy (npm)
 │   ├── dsh-locale-pl/           plugin z polskim pakietem językowym
 │   ├── android.patch.yml        nakładka profilu: pluginy, prompt systemowy, locale
-│   ├── android-shim.cjs         --require: fs.link → copyFile (Android zabrania hardlinków)
+│   ├── android-shim.cjs         --require: fs.link → copyFile (Android zabrania hardlinków), łatki na pluginy użytkownika
 │   ├── android-patches/*.mjs    łatki na pluginy (równoległy TTS, polskie napisy) nakładane po npm install
+│   ├── android-patches/profile/ łatki na pluginy instalowane przez użytkownika (tłumaczenie dsh-cost-meter), nakładane przy starcie i po zmianie profilu
 │   ├── android-prebuilt/        pty.node, system.node (flock) — prekompilowane addony
 │   ├── android-update.mjs       aktualizator w apce
 │   ├── tools.env, links.txt     zmienne środowiska i dowiązania odtwarzane po rozpakowaniu
@@ -92,6 +94,8 @@ Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 | `node-addon-require-builtin` (dsh ≥ 0.2.0) bez wariantu android-arm64 i bez źródeł | pakiet JS `node-addon-require-builtin-android-arm64`, który pod `--expose-internals` zwraca wewnętrzne moduły zwykłym `require()` |
 | menedżer pluginów dsh woła `pnpm` z `PATH` (bez niego: „pnpm was not found”) | pnpm z Termuxa w `lib/node_modules/pnpm` i skrypt `bin/pnpm` (`#!/system/bin/sh`, ścieżka względem siebie) |
 | git czyta wkompilowany `usr/etc/gitconfig` Termuxa; gdy Termux jest zainstalowany, plik istnieje, ale apka nie może go odczytać („Permission denied”, np. przy instalacji pluginu z GitHuba) | `GIT_CONFIG_NOSYSTEM=1` w `tools.env` |
+| dsh pokazuje przycisk aktualizacji tylko z mostkiem DSH Desktop (`globalThis.dshDesktop`), którego obecność przełącza też logowanie do konta, analitykę i ekran powitalny w tryb desktopowy | łatka `settings-update-bridge.mjs`: bez `dshDesktop` przycisk czyta mostek apki `DshMobileUpdate` (WebView `addJavascriptInterface`, odpowiada tylko lokalnemu dsh) |
+| pnpm instaluje pluginy użytkownika na czysto, a część z nich ma własne słowniki zh/en poza mechanizmem językowym dsh | `android-patches/profile/`: tłumaczenie po tekście angielskim, nakładane przez `android-shim.cjs` przy starcie i po każdej zmianie profilu; wszystko albo nic — gdy kod pluginu się zmieni, łatka jest pomijana z wpisem w logu, a plugin zostaje po angielsku |
 
 ### Ekran Code i wbudowany Tailscale
 
@@ -111,12 +115,14 @@ tools/build-tools.sh
 ```
 
 `update.sh` zapisuje podpisany APK w `/sdcard/Download/dsh-mobile.apk`. Podpis release używa klucza `~/.android/ciuchy-release.jks` (alias `ciuchy`, hasło w `~/.android/ciuchy-release.pass`); zmień `signingConfigs` w `app/app/build.gradle.kts` na własny klucz albo użyj `--debug`.
+Obok APK zapisuje `dsh-mobile.apk.md5` i `dsh-mobile.json` (`versionCode`, `versionName`, `md5`, `size`). Każde wydanie musi mieć `dsh-mobile.json` obok `dsh-mobile.apk`, inaczej aktualizator w apce go nie zauważy; o nowości decyduje `versionCode`, więc assety można podmieniać w miejscu pod tym samym tagiem. Najpierw wgraj APK i `.md5`, a `dsh-mobile.json` na końcu, żeby żaden telefon nie zobaczył nowej wersji, zanim jej APK będzie na miejscu.
 
 Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku). `update.sh` przed pakowaniem sam testuje start dsh na gotowym runtime.
 
 ## Tłumaczenie
 
-- Interfejs dsh: `locale-pl/pl-1..6.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. Po aktualizacji dsh brakujące klucze wyświetlają się po angielsku; `update.sh` wypisuje listę „BRAK TŁUMACZEŃ".
+- Interfejs dsh: `locale-pl/pl-1..7.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. Po aktualizacji dsh brakujące klucze wyświetlają się po angielsku; `update.sh` wypisuje listę „BRAK TŁUMACZEŃ".
+- Pluginy instalowane z menedżera: te, które używają mechanizmu językowego dsh, dostają polskie słowniki z `pl-7.json` (`dsh-market`, `archive-manager-workspace`); dsh-cost-meter z własnymi słownikami zh/en tłumaczy `stage/android-patches/profile/` (`cost-meter.pl.json`, 614 tekstów).
 - Pluginy społeczności nie korzystają z mechanizmu locale dsh (chińskie napisy na sztywno albo własne słowniki zh/en), więc spolszczają je łatki `android-patches/{qol,rewind,tts}-polish.mjs`. Gdy autor zmieni tekst, łatka zatrzymuje aktualizację z komunikatem, żeby chińskie napisy nie przeszły po cichu.
 
 ## Ograniczenia
@@ -155,7 +161,7 @@ Binarki pochodzą z pakietów Termuxa (https://github.com/termux/termux-packages
 ## Struktura repozytorium
 
 ```
-app/            projekt Gradle (Kotlin): App.kt, ServerService.kt, MainActivity.kt
+app/            projekt Gradle (Kotlin): App.kt, ServerService.kt, MainActivity.kt, ApkUpdater.kt (aktualizacja apki z wydań)
 stage/          runtime i pliki payloadu (bez node_modules — te są w ~/dsh-test)
 tools/          build-tools.sh, merge-tools.sh, apply-links.sh, test-tools.sh, root/ (wynik)
 locale-pl/      polski pakiet językowy: extract-en.mjs, pl-*.json, build-plugin.mjs, android.patch.yml

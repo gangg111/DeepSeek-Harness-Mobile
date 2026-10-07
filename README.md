@@ -28,12 +28,12 @@ One APK packs:
 - **community plugins**: mobile UI (dsh-qol), cross-session memory, turn rewind with file restore, loop breakers (repeat-stop, tool-budget), 87 reverse-engineering skills, diff-based file editing, clock in context, task list across turns, MCP bridge over stdio, TTS (Edge TTS with Polish voices, parallel synthesis of fragments),
 - a **working plugin manager**: the bundled pnpm lets Plugins → Add plugin install plugins from npm and GitHub just like on a computer; they show up under “Installed” and can be uninstalled there (the plugins built into the APK keep working but are not listed),
 - a **foreground service** that keeps the server alive in the background (notification with “Stop” and “Update” buttons),
-- an **in-app updater**: the bundled npm downloads a new dsh version, applies the Android patches from precompiled files, test-starts it and only then swaps the directory.
+- an **in-app updater** behind one “Update” button (in the notification, or the blue button at the bottom of the sidebar, as in DSH Desktop): it first checks this repository's Releases and, when a newer APK is published, downloads it with progress, verifies its md5 and offers to install it; only when there is no newer APK does the bundled npm download a new dsh version, apply the Android patches from precompiled files, test-start it and swap the directory.
 
 ## Installation
 
 1. Download `dsh-mobile.apk` from [Releases](../../releases) (about 620 MB).
-2. Allow your file manager to install from unknown sources and install it.
+2. Allow your file manager to install from unknown sources and install it. Later updates come from inside the app; the first time, Android asks to allow “Install unknown apps” for DeepSeek Harness.
 3. The first launch unpacks about 1.3 GB (60k files) into the app's storage. It takes a few minutes with a progress counter; later launches take seconds.
 4. Grant file access: the agent works in `Download` by default, and the app writes its log there (`Download/dsh_log.txt`).
 5. Enter your DeepSeek API key in the harness welcome screen.
@@ -46,8 +46,9 @@ Requirements: Android 9+ (targetSdk 28 on purpose, see below), arm64, about 2 GB
 - Language: Settings → General → Language (Polish by default when the system is Polish, English otherwise).
 - Permission mode: the app sets `danger-full-access`, because the Android kernel has neither Landlock nor bubblewrap, and dsh refuses to run commands in sandboxed modes. Android itself isolates the process (app directory plus shared storage).
 - TTS: speaker button next to a reply, “Read automatically” toggle in the composer, settings under Settings → Plugins → Voice. Default voice `pl-PL-ZofiaNeural`; `DSH_TTS_EDGE_PARALLEL` sets the number of parallel syntheses (default 30).
-- Updating dsh: notification → “Update”. After start the app checks npm and shows the available version.
+- Updating: “Update” in the notification or the blue button at the bottom of the sidebar. The app checks for updates (first a newer APK in Releases, then a newer dsh in npm) whenever it is opened, also after “Stop”, when you return to it (at most every 30 min) and every 6 hours. After the download, “Install” opens the system installer.
 - Installing plugins: Plugins → Add plugin → Install a third-party plugin. Use the full npm name including the scope (e.g. `@michengai/dsh-skills-manager`, not the unrelated `dsh-skills-manager`) or `github:owner/repo` for plugins published only on GitHub (e.g. `github:2002XiaoYu/dsh-session-diff`). dsh rejects plugins whose authors declare compatibility only with older dsh versions, and nothing is installed then.
+- Plugins installed from the plugin manager are translated where possible: Plugin Market and Archived sessions through the dsh locale mechanism, Cost (dsh-cost-meter) through a patch the app re-applies at every start and after every plugin install or update. On a fresh install Cost shows amounts in USD; an existing install keeps its saved currency (Settings → Cost → Display → Money & currency). Plugin descriptions in the market come from their authors and stay in the original language.
 - `AGENTS.md` from the working directory goes into the model's context.
 - The UI is rendered 1.2× larger than in a desktop browser (viewport meta: page width = screen/1.2; constant `UI_ZOOM` in `MainActivity.kt`), and the Android status/navigation bars take the page background color.
 - The keyboard works without suggestions, autocorrect or swipe typing in dsh fields (the WebView reports fields as “visible password”): the composer editor (Lexical) with a composing keyboard such as Samsung's selected the first letter and overwrote it with the next one (Lexical #7210). Without word composition the bug does not occur.
@@ -65,8 +66,9 @@ APK
 │   ├── dsh-locale-pl/           plugin with the Polish language pack
 │   ├── dsh-code/                Code screen plugin (host + client)
 │   ├── android.patch.yml        profile overlay: plugins, system prompt, locale
-│   ├── android-shim.cjs         --require: fs.link → copyFile (Android forbids hard links)
+│   ├── android-shim.cjs         --require: fs.link → copyFile (Android forbids hard links), patches for user-installed plugins
 │   ├── android-patches/*.mjs    plugin patches (parallel TTS, Polish strings) applied after npm install
+│   ├── android-patches/profile/ patches for plugins the user installs (translation of dsh-cost-meter), re-applied on start and on profile changes
 │   ├── android-prebuilt/        pty.node, system.node (flock) — precompiled addons
 │   ├── android-update.mjs       in-app updater
 │   ├── tools.env, links.txt     environment variables and symlinks recreated after unpacking
@@ -93,6 +95,8 @@ Workarounds needed for Termux's Node and dsh to run inside another app:
 | `node-addon-require-builtin` (dsh ≥ 0.2.0) with no android-arm64 variant and no sources | a JS package `node-addon-require-builtin-android-arm64` that returns internal modules through plain `require()` under `--expose-internals` |
 | the dsh plugin manager calls `pnpm` from `PATH` (without it: “pnpm was not found”) | pnpm from Termux in `lib/node_modules/pnpm` plus a `bin/pnpm` script (`#!/system/bin/sh`, path relative to itself) |
 | git reads Termux's compiled-in `usr/etc/gitconfig`; with Termux installed the file exists but the app cannot read it (“Permission denied”, e.g. when installing a plugin from GitHub) | `GIT_CONFIG_NOSYSTEM=1` in `tools.env` |
+| dsh shows its update button only with the DSH Desktop bridge (`globalThis.dshDesktop`), whose presence also switches account sign-in, analytics and onboarding to desktop mode | patch `settings-update-bridge.mjs`: without `dshDesktop` the button reads the app bridge `DshMobileUpdate` (WebView `addJavascriptInterface`, answering only the local dsh) |
+| pnpm reinstalls user plugins clean, and some of them keep their own zh/en dictionaries outside the dsh locale mechanism | `android-patches/profile/`: translation by English text, applied by `android-shim.cjs` at start and after every profile change; all or nothing — when the plugin code changes the patch is skipped with a log line and the plugin stays in English |
 
 ### Code screen and the built-in Tailscale node
 
@@ -112,12 +116,14 @@ tools/build-tools.sh
 ```
 
 `update.sh` writes the signed APK to `/sdcard/Download/dsh-mobile.apk`. The release signature uses the key `~/.android/ciuchy-release.jks` (alias `ciuchy`, password in `~/.android/ciuchy-release.pass`); change `signingConfigs` in `app/app/build.gradle.kts` to your own key or use `--debug`.
+Next to the APK it writes `dsh-mobile.apk.md5` and `dsh-mobile.json` (`versionCode`, `versionName`, `md5`, `size`). Every release must carry `dsh-mobile.json` next to `dsh-mobile.apk`, otherwise the in-app updater ignores it; newness is decided by `versionCode`, so assets can be replaced in place under the same tag. Upload the APK and `.md5` first and `dsh-mobile.json` last, so that no phone sees the new version before its APK is in place.
 
 Tests: `tools/test-tools.sh <rt>` (38 toolchain tests in a clean environment), `go test ./...` in `tsnet/`, `node --test` in `code/dsh-code`. Before packaging, `update.sh` test-starts dsh on the staged runtime.
 
 ## Translation
 
-- dsh UI: `locale-pl/pl-1..6.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. After a dsh update, missing keys fall back to English; `update.sh` prints the list of untranslated keys.
+- dsh UI: `locale-pl/pl-1..7.json` → `pl.json` → `build-plugin.mjs` → plugin `@dsh-local/locale-pl`. After a dsh update, missing keys fall back to English; `update.sh` prints the list of untranslated keys.
+- Plugins installed from the plugin manager: those using the dsh locale mechanism get Polish dictionaries from `pl-7.json` (`dsh-market`, `archive-manager-workspace`); dsh-cost-meter, with its own zh/en dictionaries, is translated by `stage/android-patches/profile/` (`cost-meter.pl.json`, 614 texts).
 - Community plugins do not use the dsh locale mechanism (hard-coded Chinese strings or their own zh/en dictionaries), so they are localized by the patches `android-patches/{qol,rewind,tts}-polish.mjs`. When an author changes a string, the patch stops the update with a message so that Chinese strings never slip through silently.
 
 ## Limitations
@@ -156,7 +162,7 @@ Binaries come from Termux packages (https://github.com/termux/termux-packages) a
 ## Repository layout
 
 ```
-app/            Gradle project (Kotlin): App.kt, ServerService.kt, MainActivity.kt
+app/            Gradle project (Kotlin): App.kt, ServerService.kt, MainActivity.kt, ApkUpdater.kt (app updates from Releases)
 stage/          runtime and payload files (without node_modules — those live in ~/dsh-test)
 tools/          build-tools.sh, merge-tools.sh, apply-links.sh, test-tools.sh, root/ (output)
 locale-pl/      Polish language pack: extract-en.mjs, pl-*.json, build-plugin.mjs, android.patch.yml
