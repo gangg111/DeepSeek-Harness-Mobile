@@ -1,6 +1,6 @@
 # DSH Mobile 1.2.0
 
-**DeepSeek Harness 0.2.0-rc.2 · versionCode 49 · payload 30 · arm64 · ok. 620 MB**
+**DeepSeek Harness 0.2.0-rc.2 · versionCode 52 · payload 33 · arm64 · ok. 620 MB**
 
 *English summary: DeepSeek Harness upgraded from 0.1.5-rc.3 to **0.2.0-rc.2**; the UI is rendered 1.2× larger on the phone and the Android status/navigation bars follow the page background. Also: (plugin manager, automation tasks, voice input, sidebar terminal and browser, Office/Excel previews, agent teams, keyboard shortcuts…). The Polish language pack now covers all **2446 strings** (1369 new). Two Android-specific fixes make 0.2.0 run on the phone: `koffi` pinned by dsh has no android-arm64 binary (resolved with an `overrides` to the newest 3.x that has one) and the new native `node-addon-require-builtin` has no Android variant (replaced by a JS package working under `--expose-internals`). The in-app updater applies both automatically and remembers a failed update instead of offering the same version again. Two community plugins (`dsh-memory-connect`, `dsh-reverse-skill`) are disabled by dsh 0.2.0 itself as incompatible.*
 
@@ -29,6 +29,19 @@
 
 - Nieudana sonda komputera jest ponawiana po 30 s, 2 min i 10 min, potem dopiero po zmianie stanu online urządzenia; log podaje numer próby i czas trwania sondy.
 - Lista urządzeń z tailnetu sprawdzana co sekundę do pierwszej niepustej (zaraz po `Running` bywa pusta), potem co 30 s.
+
+## Build 52 (payload 33)
+
+- **Zapis obrazów na Androidzie:** dsh przy każdym zapisie załącznika synchronizował katalogi aż do „/”, a katalogów systemowych nad danymi apki Android nie pozwala otworzyć („EACCES: permission denied, open '/data/user/0'”). Przez to nie dało się odebrać na telefonie sesji z obrazkami z komputera; łatka `attachment-dirsync.mjs` pomija synchronizację tylko tych niedostępnych katalogów.
+- Ikona „Eksportuj na komputer” pojawia się od razu (wcześniej po kilku–kilkudziesięciu sekundach), a odbiór sesji z komputera ma dłuższy limit czasu na pierwsze połączenie przez Tailscale.
+
+## Build 51 (payload 32)
+
+- Diagnostyka: komunikaty konsoli interfejsu (ostrzeżenia, błędy, wpisy ekranu Code) trafiają do `Download/dsh_log.txt`.
+
+## Build 50 (payload 31)
+
+- **Przenoszenie sesji telefon ⇄ komputer.** Przy każdej sesji na liście jest ikona „Eksportuj na komputer” (na komputerze z wtyczką [dsh-remote-control](https://github.com/gangg111/dsh-remote-control) 0.2.0 — „Eksportuj na telefon”). Jedno dotknięcie kopiuje sesję z rozmową i załącznikami na drugie urządzenie (oryginał zostaje), do domyślnego obszaru roboczego. Sesje wysłane z komputera telefon odbiera sam w ciągu kilkunastu sekund, gdy komputer jest osiągalny przez Tailscale.
 
 ## Build 49 (payload 30)
 
@@ -95,4 +108,4 @@ Aktualizacja z 1.1.0 bez odinstalowania (ten sam klucz). Pierwszy start rozpakow
 
 ## Sumy kontrolne
 
-`dsh-mobile.apk` — md5 `d81e9a76f8a5d30a5e048fb2037a277b` (plik `dsh-mobile.apk.md5`).
+`dsh-mobile.apk` — md5 `2183a8090a2593695d7b889b96a7b3b9` (plik `dsh-mobile.apk.md5`).

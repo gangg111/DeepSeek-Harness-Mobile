@@ -13,12 +13,13 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { openUrl, startTsnet, tsnetBinaryPath } from './tsnet.js'
 import { MAX_PARALLEL, acceptProbe, hostOf, nextDue, planProbes, recordFailure, runLimited } from './discover.js'
+import { createDshClient, importSession } from './vendor/transfer.js'
 
 export const name = 'dsh-code'
 export const inject = ['webServer', 'connection']
@@ -26,6 +27,11 @@ export const inject = ['webServer', 'connection']
 const PREFIX = '/api/dsh-code'
 const TIMEOUT_MS = 6000
 const MAX_BODY = 64 * 1024
+/** Przenoszenie sesji (dsh-remote-control >= 0.2.0 zgłasza capability "session-transfer" w /info). */
+const TRANSFER_TIMEOUT_MS = 5 * 60 * 1000
+const OUTBOX_POLL_MS = Number(process.env.DSH_CODE_OUTBOX_POLL_MS) || 15000   // zmienna tylko dla testów
+const OUTBOX_RETRY_MS = 5 * 60 * 1000
+const CAPS_TTL_MS = 10 * 60 * 1000
 
 export function apply(ctx) {
   const home = process.env.DSH_HOME || join(homedir(), '.dsh')
@@ -102,11 +108,16 @@ export function apply(ctx) {
     renameSync(tmp, file)
   }
 
-  async function remote(device, path, init = {}) {
+  /** Surowa odpowiedź bramy komputera (np. ZIP sesji); `remote` niżej czyta z niej JSON. */
+  async function remoteFetch(device, path, init = {}) {
     let base = device.url, extra = {}
     if (viaTsnet() && device.id) { base = (await proxyOrigin(device)) + '/'; extra = tsnet.headers() }
     else if (viaTsnet()) { const r = await tsnet.ensureProxy(new URL(device.url).host, 0); base = r.origin + '/'; extra = tsnet.headers() }   // nowe urządzenie (bez id) — port tymczasowy
-    const res = await fetch(new URL(`__remote/api${path}`, base), { ...init, signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS), headers: { 'content-type': 'application/json', ...extra, ...(init.headers ?? {}) } })
+    return fetch(new URL(`__remote/api${path}`, base), { ...init, signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS), headers: { 'content-type': 'application/json', ...extra, ...(init.headers ?? {}) } })
+  }
+
+  async function remote(device, path, init = {}) {
+    const res = await remoteFetch(device, path, init)
     const text = await res.text()
     let body = {}
     try { body = JSON.parse(text) } catch {}
@@ -172,6 +183,113 @@ export function apply(ctx) {
     return d
   }
 
+  // --- Przenoszenie sesji telefon ⇄ komputer (wspólny moduł importu z dsh-remote-control: lib/vendor/transfer.js) ---
+  // Telefon → komputer: ikona przy sesji (client.js) → POST /api/dsh-code/export → lokalny natywny eksport DSH →
+  // POST /sessions/import na komputerze. Komputer → telefon: ikona na PC odkłada sesję do skrzynki bramy; telefon nie
+  // przyjmuje połączeń, więc co OUTBOX_POLL_MS sam odbiera skrzynkę, importuje i dopiero po sukcesie potwierdza (DELETE).
+  const localDsh = createDshClient({ port: () => ctx.webServer.port, authenticatedUrl: () => ctx.connection.authenticatedUrl(`http://127.0.0.1:${String(ctx.webServer.port)}`) })
+  const caps = new Map()        // device.id -> { at, transfer }
+  const retryAt = new Map()     // transferId -> czas następnej próby po błędzie
+  const imported = new Map()    // transferId -> sessionId: zaimportowane, czekają tylko na potwierdzenie (bez ponownego importu)
+  const received = []           // ostatnie odebrane (dla logu / ekranu)
+  let pulling = false
+
+  /** Usuwa katalog sesji, której DSH nie przyjął przy kontrolnym odczycie po imporcie (jak brama PC). */
+  async function removeSession(id) {
+    const root = join(home, 'sessions')
+    for (const project of existsSync(root) ? readdirSync(root, { withFileTypes: true }) : []) {
+      const dir = join(root, project.name, id)
+      if (project.isDirectory() && existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+    }
+  }
+  const transferLog = { warn: (m) => console.log(m) }
+  const importOptions = { emit: (event, payload) => ctx.emit(event, payload), removeSession, log: transferLog }
+
+  async function supportsTransfer(device) {
+    const c = caps.get(device.id)
+    if (c && Date.now() - c.at < CAPS_TTL_MS) return c.transfer
+    let transfer = false
+    try { const info = await remote(device, '/info'); transfer = Array.isArray(info.capabilities) && info.capabilities.includes('session-transfer') } catch {}
+    caps.set(device.id, { at: Date.now(), transfer })
+    return transfer
+  }
+
+  async function pullOutboxes() {
+    if (pulling) return
+    pulling = true
+    try {
+      for (const device of data.devices) {
+        if (!(await supportsTransfer(device))) continue
+        let items
+        try { ({ items } = await remote(device, '/outbox', { timeoutMs: 15000 })) } catch { continue }   // pierwsze połączenie przez tsnet potrafi trwać > 6 s   // komputer offline: spróbujemy przy następnym obiegu
+        for (const item of Array.isArray(items) ? items : []) {
+          if (item.state && item.state !== 'waiting') continue
+          if ((retryAt.get(item.transferId) ?? 0) > Date.now()) continue
+          const t0 = Date.now()
+          if (imported.has(item.transferId)) { await acknowledge(device, item.transferId); continue }
+          try {
+            const res = await remoteFetch(device, `/outbox/${encodeURIComponent(item.transferId)}`, { timeoutMs: TRANSFER_TIMEOUT_MS })
+            if (res.status === 404) continue   // anulowane albo odebrane w międzyczasie
+            if (!res.ok) throw new Error(`HTTP ${res.status} przy pobieraniu sesji`)
+            const zip = Buffer.from(await res.arrayBuffer())
+            const result = await importSession((service) => ctx.get(service), zip, importOptions)
+            imported.set(item.transferId, result.sessionId)
+            await acknowledge(device, item.transferId)
+            retryAt.delete(item.transferId)
+            received.unshift({ at: Date.now(), from: device.name, title: result.title ?? item.title ?? null, sessionId: result.sessionId })
+            received.splice(10)
+            console.log(`[dsh-code] odebrano sesję „${result.title ?? item.title ?? item.sessionId}” z ${device.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}`)
+          } catch (error) {
+            retryAt.set(item.transferId, Date.now() + OUTBOX_RETRY_MS)
+            console.log(`[dsh-code] odbiór sesji „${item.title ?? item.sessionId}” z ${device.name} nie powiódł się (ponowię za ${OUTBOX_RETRY_MS / 60000} min): ${describe(error)}`)
+          }
+        }
+      }
+    } finally { pulling = false }
+  }
+  /**
+   * Potwierdzenie odbioru (DELETE) po udanym imporcie. 200 albo 404 (wpisu już nie ma na PC: anulowany / wysłany ponownie
+   * jako nowy wpis) = koniec. Inny błąd (np. zerwane połączenie): wpis zostaje w `imported`, więc przy następnym obiegu
+   * ponawiamy samo potwierdzenie, a sesji nie importujemy drugi raz.
+   */
+  async function acknowledge(device, transferId) {
+    try {
+      const ack = await remoteFetch(device, `/outbox/${encodeURIComponent(transferId)}`, { method: 'DELETE' })
+      if (ack.ok || ack.status === 404) { imported.delete(transferId); return }
+      console.log(`[dsh-code] potwierdzenie odbioru na ${device.name}: HTTP ${ack.status}, ponowię (sesja już zaimportowana)`)
+    } catch (error) {
+      console.log(`[dsh-code] potwierdzenie odbioru na ${device.name}: ${describe(error)}, ponowię (sesja już zaimportowana)`)
+    }
+  }
+
+  ctx.effect(() => {
+    const timer = setInterval(() => { pullOutboxes().catch((e) => console.log(`[dsh-code] skrzynka: ${e.message}`)) }, OUTBOX_POLL_MS)
+    timer.unref?.()
+    return () => clearInterval(timer)
+  }, 'dsh-code: odbiór sesji z komputerów')
+
+  /** Cel eksportu: wskazany komputer albo pierwszy połączony, który obsługuje przenoszenie sesji. */
+  async function transferTargets() {
+    const out = []
+    for (const d of data.devices) if (await supportsTransfer(d)) out.push(d)
+    return out
+  }
+
+  async function exportToComputer(body) {
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+    if (!sessionId) throw Object.assign(new Error('Brak sessionId.'), { status: 400 })
+    const targets = await transferTargets()
+    const target = body.device ? targets.find((d) => d.id === body.device) : targets[0]
+    if (!target) throw Object.assign(new Error('Brak połączonego komputera z wtyczką dsh-remote-control 0.2 lub nowszą.'), { status: 409 })
+    const exported = await localDsh.exportSession(sessionId)
+    if (!exported.ok) throw Object.assign(new Error(`Eksport sesji na telefonie nie powiódł się (HTTP ${exported.status}).`), { status: 502 })
+    const zip = Buffer.from(await exported.arrayBuffer())
+    const t0 = Date.now()
+    const result = await remote(target, '/sessions/import', { method: 'POST', body: zip, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS })
+    console.log(`[dsh-code] wysłano sesję ${sessionId} na ${target.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}`)
+    return { device: target.name, ...result }
+  }
+
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: PREFIX,
@@ -183,6 +301,8 @@ export function apply(ctx) {
       const route = `${req.method} ${url.pathname.slice(PREFIX.length)}`
       try {
         if (route === 'GET /state') return send(res, 200, await state())
+        if (route === 'GET /transfer') return send(res, 200, { targets: (await transferTargets()).map((d) => ({ id: d.id, name: d.name })), received })
+        if (route === 'POST /export') return send(res, 200, await exportToComputer(await readJson(req)))
         if (route === 'POST /devices') return send(res, 200, await addDevice(await readJson(req)))
         if (req.method === 'DELETE' && url.pathname.startsWith(`${PREFIX}/devices/`)) return send(res, 200, await removeDevice(decodeURIComponent(url.pathname.slice(`${PREFIX}/devices/`.length))))
         if (route === 'GET /workspaces') return send(res, 200, await remote(device(url.searchParams.get('device')), '/workspaces'))

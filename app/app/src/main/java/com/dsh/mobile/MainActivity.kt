@@ -121,6 +121,14 @@ class MainActivity : Activity() {
                 }
             }
             webChromeClient = object : WebChromeClient() {
+                // Konsola strony do logu apki: ostrzeżenia, błędy (np. plugin klienta, który nie wystartował) i wpisy pluginów apki.
+                override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                    val text = m.message() ?: return false
+                    val level = m.messageLevel()
+                    if (level == android.webkit.ConsoleMessage.MessageLevel.ERROR || level == android.webkit.ConsoleMessage.MessageLevel.WARNING || text.contains("dsh-code"))
+                        (application as App).log("js ${level.name.lowercase()}: ${text.take(600)} (${m.sourceId()?.substringAfterLast('/')?.take(80)}:${m.lineNumber()})")
+                    return false
+                }
                 // Bez tego <input type="file"> w WebView nic nie robi: załączniki i zdjęcia w kompozytorze DSH.
                 override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
                     fileCallback?.onReceiveValue(null)

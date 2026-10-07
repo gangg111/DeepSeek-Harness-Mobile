@@ -221,6 +221,82 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // --- Ikona „Eksportuj na komputer” przy wierszu sesji (ten sam slot, rozmiar i kolory co ikona „Eksportuj na telefon”
+    // z dsh-remote-control na PC). Serwer (POST /api/dsh-code/export) robi natywny eksport sesji i wysyła ją do bramy
+    // komputera; ikona jest ukryta, gdy żaden komputer nie zgłasza obsługi przenoszenia (GET /api/dsh-code/transfer).
+    const XFER_COPY = {
+      pl: { send: 'Eksportuj na komputer', sending: 'Wysyłanie na komputer…', done: 'Wysłano na komputer', failed: 'Nie udało się wysłać sesji na komputer' },
+      en: { send: 'Export to computer', sending: 'Sending to the computer…', done: 'Sent to the computer', failed: 'Could not send the session to the computer' },
+    }
+    const xferCopy = () => ((document.documentElement.lang || '').toLowerCase().startsWith('pl') ? XFER_COPY.pl : XFER_COPY.en)
+    const transferStore = (() => {
+      let targets = []
+      const listeners = new Set()
+      let timer = null
+      async function refresh() {
+        try {
+          const res = await fetch('/api/dsh-code/transfer', { credentials: 'same-origin', cache: 'no-store' })
+          if (!res.ok) { console.warn(`[dsh-code] transfer: HTTP ${res.status}`); return }
+          const next = (await res.json()).targets ?? []
+          if (JSON.stringify(next) !== JSON.stringify(targets)) {
+            console.log(`[dsh-code] komputery do eksportu: ${next.map((d) => d.name).join(', ') || 'brak'}`)
+            targets = next; for (const l of listeners) l()
+          }
+        } catch (error) { console.warn(`[dsh-code] transfer: ${error}`) }
+      }
+      return {
+        subscribe(listener) {
+          listeners.add(listener)
+          // Dopóki serwer nie zna komputerów (pierwsze sprawdzenie /info trwa kilka sekund), pytamy co 3 s, potem co 30 s.
+          if (listeners.size === 1) { const tick = () => { void refresh().finally(() => { if (listeners.size > 0) timer = window.setTimeout(tick, targets.length ? 30000 : 3000) }) }; tick() }
+          return () => { listeners.delete(listener); if (listeners.size === 0 && timer !== null) { window.clearTimeout(timer); timer = null } }
+        },
+        snapshot: () => targets,
+      }
+    })()
+
+    /** Komputer ze strzałką w górę (wyślij), ten sam komputer z haczykiem (wysłano). */
+    function ComputerIcon({ state }) {
+      const common = { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
+      const screen = h('rect', { x: 1.5, y: 2.5, width: 13, height: 9, rx: 1.4 })
+      const stand = h('path', { d: 'M5.5 14h5M8 11.5V14' })
+      const mark = state === 'done' ? h('path', { d: 'M5.6 7l1.6 1.6 3.2-3.3' }) : h('path', { d: 'M8 9.2V4.8M5.9 6.8L8 4.7l2.1 2.1' })
+      return h('svg', common, screen, stand, mark)
+    }
+
+    function ExportToComputerButton({ sessionId }) {
+      const targets = React.useSyncExternalStore(transferStore.subscribe, transferStore.snapshot)
+      const [state, setState] = useState('idle')
+      const [hover, setHover] = useState(false)
+      if (targets.length === 0) return null
+      const c = xferCopy()
+      const label = (state === 'busy' ? c.sending : state === 'done' ? c.done : c.send) + (targets.length ? ` (${targets[0].name})` : '')
+      async function onClick(event) {
+        event.preventDefault(); event.stopPropagation()
+        if (state === 'busy') return
+        setState('busy')
+        try {
+          const res = await fetch('/api/dsh-code/export', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId }) })
+          const body = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
+          setState('done'); window.setTimeout(() => setState('idle'), 4000)
+        } catch (error) {
+          setState('idle')
+          window.alert(`${c.failed}: ${error.message}`)
+        }
+      }
+      const color = state === 'busy' || state === 'done' ? 'var(--dsw-alias-state-business-primary)' : hover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)'
+      return h('button', {
+        type: 'button', title: label, 'aria-label': label, 'aria-busy': state === 'busy', onClick,
+        onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false),
+        style: {
+          flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 16, height: 16, padding: 0, border: 'none', borderRadius: 'var(--dsw-radius-xs)',
+          background: 'transparent', cursor: state === 'busy' ? 'progress' : 'pointer', color, opacity: state === 'busy' ? 0.5 : 1,
+        },
+      }, h(ComputerIcon, { state }))
+    }
+
     return {
       inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
@@ -230,6 +306,9 @@ window.__ModuleLoader__.load({
         const Page = makePage(t)
         ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL, locale: NS }, Page))
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL, order: 5, label: () => t('code'), locale: NS }, CodeIcon))
+        try {
+          ctx.slots.inject('sidebar.workspaces.session.row.action', () => ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'dsh-code.export-to-computer', order: 50 }, ExportToComputerButton))
+        } catch (error) { console.error(`[dsh-code] slot ikony: ${error?.stack ?? error}`) }
       },
     }
   },
