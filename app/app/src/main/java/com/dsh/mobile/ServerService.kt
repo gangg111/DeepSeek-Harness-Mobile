@@ -148,6 +148,8 @@ class ServerService : Service() {
      * aktualizacja dsh w apce: zatrzymuje serwer, odpala android-update.mjs (npm z payloadu), potem pętla restartuje serwer.
      */
     private fun runUpdate() {
+        // APK już pobrane i czeka na potwierdzenie: nie pobieramy drugi raz, tylko otwieramy okno instalacji.
+        installIntent?.let { pending -> try { pending.send(); return } catch (_: Throwable) { installIntent = null } }
         if (updating) return
         updating = true
         val app = application as App
@@ -267,11 +269,11 @@ class ServerService : Service() {
             .setOngoing(true)
             .setDeleteIntent(repost)
             .addAction(Notification.Action.Builder(null, "Zatrzymaj", stop).build())
-            .addAction(Notification.Action.Builder(null, when {
+            .apply { if (installIntent == null) addAction(Notification.Action.Builder(null, when {
                 availableApk != null -> "Aktualizuj apkę do ${availableApk!!.versionName}"
                 availableVersion != null -> "Aktualizuj do $availableVersion"
                 else -> "Aktualizuj"
-            }, upd).build())
+            }, upd).build()) }
             .apply {
                 val install = installIntent
                 if (install != null) addAction(Notification.Action.Builder(null, "Zainstaluj", install).build())
