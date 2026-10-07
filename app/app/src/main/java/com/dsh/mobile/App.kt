@@ -90,7 +90,9 @@ class App : Application() {
                 if (url == null && line.startsWith("dsh web:") && m != null) {
                     url = m.value; onUrl?.invoke(m.value)
                     setStatus("Serwer działa: port ${Regex(":(\\d+)/").find(m.value)?.groupValues?.get(1) ?: "?"}")
-                    ServerService.instance?.maybeCheckForUpdate()   // także po restarcie serwera w tym samym procesie
+                    // Ręczny start serwera sprawdza zawsze; automatyczny restart po awarii najwyżej co 5 min.
+                    val force = ServerService.forceCheckOnBoot; ServerService.forceCheckOnBoot = false
+                    ServerService.instance?.maybeCheckForUpdate(if (force) 0L else ServerService.CHECK_CRASH_RESTART_MS)
                 }
             }
         }

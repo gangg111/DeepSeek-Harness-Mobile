@@ -71,10 +71,14 @@ class ServerService : Service() {
         /** Ostatnie sprawdzenie aktualizacji (GitHub, potem npm); sprawdzamy przy starcie serwera, powrocie do apki i co 6 h. */
         @Volatile var lastCheckAt = 0L
         const val CHECK_MIN_INTERVAL_MS = 30 * 60 * 1000L
+        /** Restart serwera po awarii (co 3 s w pętli) sprawdza najwyżej co 5 min; ręczny start — zawsze (forceCheckOnBoot). */
+        const val CHECK_CRASH_RESTART_MS = 5 * 60 * 1000L
+        @Volatile var forceCheckOnBoot = true
         const val CHECK_PERIOD_MS = 6 * 60 * 60 * 1000L
 
         fun start(ctx: Context) {
             stopRequested = false
+            forceCheckOnBoot = true   // ręczne uruchomienie (start apki, otwarcie po „Zatrzymaj”): sprawdź aktualizacje bez progu
             ctx.startForegroundService(Intent(ctx, ServerService::class.java))
         }
     }
