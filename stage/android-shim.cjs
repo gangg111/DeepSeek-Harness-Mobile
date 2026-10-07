@@ -18,3 +18,13 @@ fs.linkSync = function (src, dst) {
 };
 fs.link = function (src, dst, cb) { fs.promises.link(src, dst).then(() => cb(null), cb); };
 require('module').syncBuiltinESMExports();
+
+// Łatki na pluginy instalowane przez użytkownika (profil dsh): przy starcie serwera i po każdej zmianie profilu,
+// bo instalacja/aktualizacja pluginu przez pnpm wymienia jego pliki na czyste (android-patches/profile/).
+if (process.env.DSH_HOME && process.argv.some((a) => /[\\/]@deepseek-ai[\\/]dsh[\\/]lib[\\/]bin\.js$/.test(a))) {
+  try {
+    const profile = require(require('path').join(__dirname, 'android-patches', 'profile', 'index.cjs'));
+    profile.applyAll(process.env.DSH_HOME);
+    profile.watch(process.env.DSH_HOME);
+  } catch (e) { console.error(`[android] łatki pluginów z profilu: ${e.message}`) }
+}
