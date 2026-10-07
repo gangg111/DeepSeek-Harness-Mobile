@@ -13,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebResourceRequest
 import android.webkit.WebViewClient
@@ -45,6 +46,22 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var label: TextView
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    /** Adres bieżącej strony: mostek aktualizacji odpowiada tylko lokalnemu dsh, nie sesjom z komputera otwieranym przez Code. */
+    @Volatile private var pageUrl: String? = null
+
+    /**
+     * Mostek dla przycisku aktualizacji w interfejsie dsh (łatka android-patches/settings-update-bridge.mjs): dsh pokazuje
+     * niebieski przycisk na dole paska bocznego tylko z mostkiem Desktop (globalThis.dshDesktop), którego w WebView nie ma.
+     */
+    inner class UpdateBridge {
+        private fun local() = pageUrl?.startsWith("http://127.0.0.1:3090/") == true
+        @JavascriptInterface fun status(): String = if (local()) ServerService.bridgeStatus() else "{\"phase\":\"idle\"}"
+        @JavascriptInterface fun open(): Boolean {
+            if (!local()) return false
+            runOnUiThread { ServerService.bridgeOpen(this@MainActivity) }
+            return true
+        }
+    }
 
     private companion object {
         const val REQ_FILES = 41
@@ -92,7 +109,9 @@ class MainActivity : Activity() {
                     }
                     return false
                 }
+                override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) { pageUrl = url }
                 override fun onPageFinished(view: WebView, url: String?) {
+                    pageUrl = url
                     if (!PLAIN_WEBVIEW) applyZoom()
                     syncBars()
                     // Diagnostyka układu (raz na stronę): szerokość CSS decyduje o mobilnym/desktopowym układzie dsh i dsh-qol (próg 768 px).
@@ -117,6 +136,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
+            addJavascriptInterface(UpdateBridge(), "DshMobileUpdate")
             visibility = View.GONE
         }
         label = TextView(this).apply {

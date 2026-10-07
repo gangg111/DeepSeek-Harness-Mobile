@@ -35,6 +35,37 @@ class ServerService : Service() {
         @Volatile var availableApk: ApkUpdater.Release? = null
         /** Systemowe potwierdzenie instalacji pobranego APK (z usługi w tle nie wolno go otworzyć samemu). */
         @Volatile var installIntent: PendingIntent? = null
+        /** Postęp pobierania APK (null = nie pobiera) i ostatni błąd aktualizacji — dla przycisku w interfejsie dsh. */
+        @Volatile var apkPercent: Int? = null
+        @Volatile var updateError: String? = null
+
+        /**
+         * Stan dla niebieskiego przycisku aktualizacji w interfejsie dsh (format „presentation” mostka Desktop:
+         * phase idle|available|downloading|installing|ready|error, percent, version, failure). Czyta go WebView przez DshMobileUpdate.
+         */
+        fun bridgeStatus(): String {
+            val o = org.json.JSONObject()
+            val apk = availableApk
+            val apkLabel = apk?.let { "DSH Mobile ${it.versionName} (build ${it.versionCode})" }
+            when {
+                installIntent != null -> { o.put("phase", "ready"); apkLabel?.let { o.put("version", it) } }
+                apkPercent != null -> { o.put("phase", "downloading"); o.put("percent", apkPercent); apkLabel?.let { o.put("version", it) } }
+                updating -> o.put("phase", "installing")
+                updateError != null -> { o.put("phase", "error"); o.put("failure", "download") }
+                updateFailed -> { o.put("phase", "error"); o.put("failure", "install") }
+                apkLabel != null -> { o.put("phase", "available"); o.put("version", apkLabel) }
+                availableVersion != null -> { o.put("phase", "available"); o.put("version", "dsh $availableVersion") }
+                else -> o.put("phase", "idle")
+            }
+            return o.toString()
+        }
+
+        /** Kliknięcie przycisku w interfejsie dsh: gotowe APK → systemowe okno instalacji (apka jest na wierzchu), inaczej „Aktualizuj”. */
+        fun bridgeOpen(ctx: Context) {
+            val install = installIntent
+            if (install != null) { try { install.send(); return } catch (_: Throwable) {} }
+            ctx.startService(Intent(ctx, ServerService::class.java).setAction(ACTION_UPDATE))
+        }
         @Volatile var instance: ServerService? = null
 
         fun start(ctx: Context) {
@@ -109,8 +140,9 @@ class ServerService : Service() {
         if (updating) return
         updating = true
         val app = application as App
+        updateError = null
         Thread {
-            val apk = try { ApkUpdater.newer(app) } catch (e: Throwable) { app.log("apk: sprawdzenie GitHuba nie powiodło się: $e"); null }
+            val apk = try { ApkUpdater.newer(app) { app.log(it) } } catch (e: Throwable) { app.log("apk: sprawdzenie GitHuba nie powiodło się: $e"); null }
             if (apk != null) {
                 // Serwer działa dalej w trakcie pobierania; instalacja i tak zastąpi proces apki.
                 try {
@@ -118,12 +150,14 @@ class ServerService : Service() {
                     val label = "DSH Mobile ${apk.versionName}"
                     app.log("apk: pobieram $label (versionCode ${apk.versionCode}, ${apk.size} B)")
                     update("Pobieranie $label…")
-                    ApkUpdater.downloadAndCommit(app, apk) { done, total -> update("Pobieranie $label: ${done * 100 / maxOf(total, 1)}% (${done shr 20} z ${total shr 20} MB)") }
+                    apkPercent = 0
+                    ApkUpdater.downloadAndCommit(app, apk) { done, total -> apkPercent = (done * 100 / maxOf(total, 1)).toInt(); update("Pobieranie $label: ${done * 100 / maxOf(total, 1)}% (${done shr 20} z ${total shr 20} MB)") }
                     app.log("apk: pobrano i sprawdzono md5, czekam na potwierdzenie instalacji")
                     update("Pobrano $label (md5 zgodne). Potwierdź instalację — przycisk „Zainstaluj”.")
                 } catch (e: Throwable) {
+                    updateError = "${e.message ?: e}"
                     app.log("apk: błąd $e"); update("Aktualizacja apki nie powiodła się: ${e.message ?: e}. Spróbuj ponownie „Aktualizuj”.")
-                } finally { updating = false }
+                } finally { apkPercent = null; updating = false }
                 return@Thread
             }
             try {
@@ -154,7 +188,7 @@ class ServerService : Service() {
         Thread {
             try {
                 val app = application as App
-                val apk = try { ApkUpdater.newer(app) } catch (e: Throwable) { app.log("apk: sprawdzenie GitHuba nie powiodło się: $e"); null }
+                val apk = try { ApkUpdater.newer(app) { app.log(it) } } catch (e: Throwable) { app.log("apk: sprawdzenie GitHuba nie powiodło się: $e"); null }
                 if (apk != null) {
                     availableApk = apk
                     app.log("apk: dostępna ${apk.versionName} (versionCode ${apk.versionCode})")

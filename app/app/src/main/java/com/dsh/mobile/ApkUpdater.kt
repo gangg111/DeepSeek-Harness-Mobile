@@ -53,8 +53,16 @@ object ApkUpdater {
         return Release(j.getLong("versionCode"), j.getString("versionName"), j.getString("md5").lowercase(), j.getLong("size"), apk)
     }
 
-    /** Nowsze wydanie niż zainstalowana apka albo null. */
-    fun newer(ctx: Context): Release? = latest()?.takeIf { it.versionCode > installedVersionCode(ctx) }
+    /** Nowsze wydanie niż zainstalowana apka albo null; każdy wynik trafia do logu apki (diagnoza „nie widzę aktualizacji”). */
+    fun newer(ctx: Context, log: (String) -> Unit = {}): Release? {
+        val mine = installedVersionCode(ctx)
+        val rel = latest()
+        when {
+            rel == null -> log("apk: najnowsze wydanie nie ma dsh-mobile.json — pomijam aktualizację apki")
+            rel.versionCode <= mine -> log("apk: brak nowszej wersji (GitHub ${rel.versionCode}, zainstalowana $mine)")
+        }
+        return rel?.takeIf { it.versionCode > mine }
+    }
 
     /**
      * Pobiera APK do sesji instalatora i zatwierdza ją; wynik (w tym prośba o potwierdzenie przez użytkownika)

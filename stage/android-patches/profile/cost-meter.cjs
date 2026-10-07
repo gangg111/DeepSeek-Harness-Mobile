@@ -11,6 +11,7 @@ const path = require('path');
 const vm = require('vm');
 
 const MARK = '/*[android] cost-meter pl*/';
+const USD_MARK = '/*[android] cost-meter usd*/';
 
 function write(file, text) {
   // Zapis przez plik tymczasowy + rename: nie zmienia pliku, który pnpm mógł dowiązać z magazynu pakietów.
@@ -19,8 +20,29 @@ function write(file, text) {
   fs.renameSync(tmp, file);
 }
 
+// Domyślna waluta wyświetlania USD zamiast CNY (te same wartości, które ustawia wybór „Dolar amerykański (USD)” w ustawieniach
+// pluginu). Dotyczy tylko świeżej instalacji: zapisana konfiguracja pluginu ma pierwszeństwo. Osobny znacznik, bo dochodzi do
+// instalacji, na których łatka polska jest już nałożona (reguła „wszystko albo nic” dotyczy tylko plików tłumaczenia).
+function patchDefaultCurrency(lib) {
+  const file = path.join(lib, 'store.js');
+  const s = fs.readFileSync(file, 'utf8');
+  if (s.includes(USD_MARK)) return false;
+  const re = /(\n\s*)currency: 'CNY',([^\n]*)\n(\s*)symbol: '¥',\n(\s*)decimals: 4,\n(\s*)exchangeRate: 7\.2,/;
+  if (!re.test(s)) throw new Error('store.js: brak domyślnej waluty CNY');
+  write(file, USD_MARK + '\n' + s.replace(re, "$1currency: 'USD',$2\n$3symbol: '$$',\n$4decimals: 6,\n$5exchangeRate: 1,"));
+  return true;
+}
+
 module.exports = function patchCostMeter(dir) {
   const lib = path.join(dir, 'lib');
+  const done = [];
+  try { if (patchDefaultCurrency(lib)) done.push('domyślnie USD') } catch (e) { done.push(`domyślna waluta pominięta (${e.message})`) }
+  const pl = patchTranslation(lib);
+  if (pl) done.unshift(pl);
+  return done.length ? done.join('; ') : null;
+};
+
+function patchTranslation(lib) {
   const files = { client: 'client.js', stats: 'client.statistics.js', index: 'index.js', locale: 'locale.js' };
   const src = {};
   for (const [k, f] of Object.entries(files)) src[k] = fs.readFileSync(path.join(lib, f), 'utf8');

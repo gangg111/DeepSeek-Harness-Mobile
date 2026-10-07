@@ -1,6 +1,6 @@
 # DSH Mobile 1.2.0
 
-**DeepSeek Harness 0.2.0-rc.2 · versionCode 38 · payload 26 · arm64 · ok. 620 MB**
+**DeepSeek Harness 0.2.0-rc.2 · versionCode 44 · payload 29 · arm64 · ok. 620 MB**
 
 *English summary: DeepSeek Harness upgraded from 0.1.5-rc.3 to **0.2.0-rc.2**; the UI is rendered 1.2× larger on the phone and the Android status/navigation bars follow the page background. Also: (plugin manager, automation tasks, voice input, sidebar terminal and browser, Office/Excel previews, agent teams, keyboard shortcuts…). The Polish language pack now covers all **2446 strings** (1369 new). Two Android-specific fixes make 0.2.0 run on the phone: `koffi` pinned by dsh has no android-arm64 binary (resolved with an `overrides` to the newest 3.x that has one) and the new native `node-addon-require-builtin` has no Android variant (replaced by a JS package working under `--expose-internals`). The in-app updater applies both automatically and remembers a failed update instead of offering the same version again. Two community plugins (`dsh-memory-connect`, `dsh-reverse-skill`) are disabled by dsh 0.2.0 itself as incompatible.*
 
@@ -29,6 +29,20 @@
 
 - Nieudana sonda komputera jest ponawiana po 30 s, 2 min i 10 min, potem dopiero po zmianie stanu online urządzenia; log podaje numer próby i czas trwania sondy.
 - Lista urządzeń z tailnetu sprawdzana co sekundę do pierwszej niepustej (zaraz po `Running` bywa pusta), potem co 30 s.
+
+## Build 44 (payload 29)
+
+- Bez zmian w działaniu względem buildu 43 — numer podbity do testu przycisku aktualizacji w interfejsie.
+
+## Build 43 (payload 29)
+
+- **Przycisk aktualizacji w interfejsie dsh**, jak w aplikacji desktopowej: niebieski przycisk na dole paska bocznego (i kropka na przycisku rozwijania paska) pokazuje dostępną aktualizację, postęp pobierania i „Zainstaluj i uruchom ponownie”. Kliknięcie robi to samo co „Aktualizuj” w powiadomieniu: najpierw nowe APK z tego repozytorium, potem dsh z npm. Apka nie udaje aplikacji desktopowej (to przełączyłoby w dsh logowanie do konta i analitykę) — przycisk czyta stan z mostka apki, dostępnego tylko dla lokalnego dsh.
+- Log apki opisuje każdy wynik sprawdzenia GitHuba (także „brak nowszej wersji” i „wydanie bez dsh-mobile.json”).
+
+## Build 42 (payload 28)
+
+- **Aktualizacja apki jednym przyciskiem.** „Aktualizuj” w powiadomieniu najpierw sprawdza wydania w tym repozytorium: gdy jest nowsze APK (plik `dsh-mobile.json` w wydaniu, wyższy versionCode), apka pobiera je z postępem w powiadomieniu, sprawdza md5 i proponuje instalację przyciskiem „Zainstaluj”. Dopiero gdy nowszego APK nie ma, aktualizuje dsh z npm jak dotąd. Przy pierwszej instalacji z apki Android prosi o zgodę „Instaluj nieznane aplikacje”.
+- **Polski dla pluginów instalowanych z menedżera:** Sklep z pluginami (dshmarket, 689 napisów) i Zarchiwizowane sesje (@michengai/dsh-archive-manager, 264) przez mechanizm językowy dsh; Cost (dsh-cost-meter, 614 tekstów) przez łatkę, którą apka nakłada przy każdym starcie i po każdej instalacji/aktualizacji pluginu (gdy kod pluginu się zmieni, łatka jest pomijana, a plugin zostaje po angielsku). Opisy pluginów w sklepie to dane od autorów i zostają w oryginale.
 
 ## Build 38 (payload 26)
 
@@ -60,4 +74,4 @@ Aktualizacja z 1.1.0 bez odinstalowania (ten sam klucz). Pierwszy start rozpakow
 
 ## Sumy kontrolne
 
-`dsh-mobile.apk` — md5 `08751743670406021f830faee8b7d945` (plik `dsh-mobile.apk.md5`).
+`dsh-mobile.apk` — md5 `6273ad55a0c0ceb50850c6f285e8c8d1` (plik `dsh-mobile.apk.md5`).
