@@ -1,4 +1,4 @@
-// Kopia bez zmian z gangg111/dsh-remote-control@b5532db lib/zip.js (wspólny moduł przenoszenia sesji telefon ⇄ komputer). Aktualizować kopiując ponownie.
+// Kopia bez zmian z gangg111/dsh-remote-control@c659179 lib/zip.js (wspólny moduł przenoszenia sesji telefon ⇄ komputer). Aktualizować kopiując ponownie.
 /**
  * Minimalny czytnik ZIP dla natywnego eksportu sesji DSH (`dsh-session-<id>.zip`).
  *

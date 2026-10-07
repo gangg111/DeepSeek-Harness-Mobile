@@ -238,7 +238,7 @@ export function apply(ctx) {
             retryAt.delete(item.transferId)
             received.unshift({ at: Date.now(), from: device.name, title: result.title ?? item.title ?? null, sessionId: result.sessionId })
             received.splice(10)
-            console.log(`[dsh-code] odebrano sesję „${result.title ?? item.title ?? item.sessionId}” z ${device.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}`)
+            console.log(`[dsh-code] odebrano sesję „${result.title ?? item.title ?? item.sessionId}” z ${device.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}${result.modelChanged ? `; model ${result.modelChanged.from} niedostępny tutaj -> ${result.modelChanged.to}` : ''}`)
           } catch (error) {
             retryAt.set(item.transferId, Date.now() + OUTBOX_RETRY_MS)
             console.log(`[dsh-code] odbiór sesji „${item.title ?? item.sessionId}” z ${device.name} nie powiódł się (ponowię za ${OUTBOX_RETRY_MS / 60000} min): ${describe(error)}`)
@@ -286,7 +286,7 @@ export function apply(ctx) {
     const zip = Buffer.from(await exported.arrayBuffer())
     const t0 = Date.now()
     const result = await remote(target, '/sessions/import', { method: 'POST', body: zip, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS })
-    console.log(`[dsh-code] wysłano sesję ${sessionId} na ${target.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}`)
+    console.log(`[dsh-code] wysłano sesję ${sessionId} na ${target.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}${result.modelChanged ? `; na PC model ${result.modelChanged.from} -> ${result.modelChanged.to}` : ''}`)
     return { device: target.name, ...result }
   }
 

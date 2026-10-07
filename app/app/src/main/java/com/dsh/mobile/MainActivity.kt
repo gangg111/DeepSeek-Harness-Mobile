@@ -104,7 +104,9 @@ class MainActivity : Activity() {
             // (także https://<pc>.ts.net przez VPN i http://127.0.0.1:<port> przez wbudowany węzeł).
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                    if (request.url.host == "login.tailscale.com") {
+                    // Logowanie do Tailscale i do konta DeepSeek (Google blokuje logowanie w WebView) idzie w prawdziwej przeglądarce;
+                    // powrót z DeepSeek trafia na http://127.0.0.1:3090/oauth/callback, czyli do serwera w apce.
+                    if (request.url.host == "login.tailscale.com" || request.url.host == "platform.deepseek.com") {
                         startActivity(Intent(Intent.ACTION_VIEW, request.url)); return true
                     }
                     return false

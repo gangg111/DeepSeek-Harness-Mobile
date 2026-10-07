@@ -1,4 +1,4 @@
-// Kopia bez zmian z gangg111/dsh-remote-control@b5532db lib/transfer.js (wspólny moduł przenoszenia sesji telefon ⇄ komputer). Aktualizować kopiując ponownie.
+// Kopia bez zmian z gangg111/dsh-remote-control@c659179 lib/transfer.js (wspólny moduł przenoszenia sesji telefon ⇄ komputer). Aktualizować kopiując ponownie.
 /**
  * Przenoszenie sesji miedzy instalacjami DSH (telefon <-> komputer) na natywnym eksporcie DSH.
  *
@@ -60,6 +60,15 @@ export function parseExport(zip) {
   events.forEach((e, i) => {
     if (e?.seq !== i || typeof e.type !== 'string') throw new TransferError(400, `Zdarzenie ${i} ma niepoprawny numer kolejny.`)
   })
+  const { images, files } = readMedia(entries)
+  return { header, events, images, files, subagents: [...entries.keys()].filter((k) => k.startsWith('subagents/')).length }
+}
+
+/**
+ * Obrazy i pliki z archiwum w ukladzie natywnego eksportu DSH.
+ * @param {Map<string, Buffer>} entries - wynik readZip.
+ */
+export function readMedia(entries) {
   const images = new Map()
   const files = new Map()
   for (const [name, data] of entries) {
@@ -67,11 +76,21 @@ export function parseExport(zip) {
     if ((m = /^media\/(.+)\.([a-z]+)$/.exec(name)) && IMAGE_TYPES[m[2]]) images.set(m[1], { data, mediaType: IMAGE_TYPES[m[2]] })
     else if ((m = /^files\/[0-9a-f]{2}\/([0-9a-f]{64})\/(.+)$/.exec(name))) files.set(`sha256:${m[1]}`, { data, name: m[2] })
   }
-  return { header, events, images, files, subagents: [...entries.keys()].filter((k) => k.startsWith('subagents/')).length }
+  return { images, files }
+}
+
+/** Nazwa wpisu ZIP dla obrazu albo pliku w ukladzie eksportu DSH. */
+export function mediaEntryName(ref) {
+  if (typeof ref.mediaType === 'string' && ref.mediaType.startsWith('image/')) {
+    const ext = Object.entries(IMAGE_TYPES).find(([, t]) => t === ref.mediaType)?.[0] ?? 'png'
+    return `media/${ref.attachmentId}.${ext}`
+  }
+  const sha = String(ref.attachmentId).replace(/^sha256:/, '')
+  return `files/${sha.slice(0, 2)}/${sha}/${ref.name ?? 'plik'}`
 }
 
 /** Zapisuje zalaczniki ponownie; zwraca mape stary attachmentId -> nowy opis. */
-async function saveAttachments(attachments, images, files) {
+export async function saveAttachments(attachments, images, files) {
   const map = new Map()
   if (!attachments) {
     if (images.size + files.size > 0) throw new TransferError(503, 'Usluga zalacznikow DSH jest niedostepna.')
@@ -107,11 +126,12 @@ export function remapAttachments(value, map) {
 
 /**
  * Znacznik wyslania logu do DeepSeek (`session-log-deepseek/delivery-accepted`) musi nazywac sesje,
- * w ktorej lezy (DSH odrzuca log z obcym `sessionId`). Po imporcie wskazuje nowa sesje, wiec juz
- * wyslane zdarzenia nie sa wysylane ponownie.
+ * w ktorej lezy (DSH odrzuca log z obcym `sessionId`). Rozgalezienie dziedziczy znaczniki rodzica,
+ * a import tworzy sesje bez rodzica, wiec KAZDY znacznik wskazuje po imporcie nowa sesje (juz
+ * wyslane zdarzenia nie sa wysylane ponownie).
  */
-export function rebindDeliveryMarker(event, fromId, toId) {
-  if (event.type !== 'session-log-deepseek/delivery-accepted' || event.data?.sessionId !== fromId) return event
+export function rebindDeliveryMarker(event, _fromId, toId) {
+  if (event.type !== 'session-log-deepseek/delivery-accepted' || typeof event.data?.sessionId !== 'string') return event
   return { ...event, data: { ...event.data, sessionId: toId } }
 }
 
@@ -146,16 +166,20 @@ export async function importSession(get, zip, options = {}) {
   const map = await saveAttachments(get('attachments'), parsed.images, parsed.files)
   const id = `session-${randomUUID()}`
   const events = parsed.events.map((e) => rebindDeliveryMarker(remapAttachments(e, map), parsed.header.id, id))
+  // Rozgalezienie ma w logu znacznik `session/end-seed {inherited:true}` na koncu odziedziczonej czesci,
+  // a DSH nie przyjmuje go w sesji nierozgalezionej: importujemy je jako rozgalezienie (bez rodzica,
+  // ktorego tu nie ma) z ta sama liczba odziedziczonych zdarzen.
+  const seedIndex = events.findIndex((e) => e.type === 'session/end-seed' && e.data?.inherited === true)
   const header = {
     version: SESSION_FORMAT,
     id,
     createdAt: Date.now(),
     cwd,
-    isSeeded: false,
+    isSeeded: seedIndex >= 0,
     delegationDepth: 0,
     ...(typeof parsed.header.agentPreset === 'string' ? { agentPreset: parsed.header.agentPreset } : {}),
   }
-  const handle = await persistence.create(header)
+  const handle = await persistence.create(header, seedIndex >= 0 ? { inheritedEventCount: seedIndex } : undefined)
   try {
     if (events.length > 0) await handle.append(events)
     await handle.flush()
@@ -183,7 +207,53 @@ export async function importSession(get, zip, options = {}) {
   if (title && typeof controller?.rename === 'function') {
     try { await controller.rename({ sessionId: id, title }) } catch (error) { options.log?.warn?.(`[dsh-remote-control] tytul importu: ${error?.message ?? error}`) }
   }
-  return { sessionId: id, title, events: events.length, attachments: map.size, skippedSubagents: parsed.subagents }
+  let modelChanged = null
+  try {
+    modelChanged = await fitModelToDevice(get, id, events)
+  } catch (error) {
+    options.log?.warn?.(`[dsh-remote-control] model importu: ${error?.message ?? error}`)
+  }
+  return { sessionId: id, title, events: events.length, attachments: map.size, skippedSubagents: parsed.subagents, modelChanged }
+}
+
+/**
+ * Model, ktorego sesja uzyje przy nastepnym zadaniu, jak w DSH (agent.ts): ostatni `model/selection`
+ * (`data: {provider, model}`) po ostatnim `request/header`, inaczej `data.header.config` ostatniego
+ * `request/header`.
+ * @returns {{ provider: string, model: string } | undefined}
+ */
+export function sessionModel(events) {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]
+    if (e.type === 'model/selection' && typeof e.data?.provider === 'string' && typeof e.data?.model === 'string') return { provider: e.data.provider, model: e.data.model }
+    const config = e.type === 'request/header' ? e.data?.header?.config : undefined
+    if (typeof config?.provider === 'string' && typeof config?.model === 'string') return { provider: config.provider, model: config.model }
+  }
+  return undefined
+}
+
+/**
+ * Sesja niesie wybor modelu z urzadzenia nadawcy (np. logowanie kontem DeepSeek), ktorego odbiorca
+ * moze nie miec. Gdy dostawcy albo modelu tu nie ma, oficjalne `sessionController.selectModel`
+ * (wznawia sesje i dopisuje `model/selection`) przestawia ja na domyslny model tego urzadzenia.
+ * @returns {Promise<{ from: string, to: string } | null>}
+ */
+async function fitModelToDevice(get, sessionId, events) {
+  const current = sessionModel(events)
+  const llm = get('llm')
+  const controller = get('sessionController')
+  const fallback = get('agentDefaultModel')?.currentSelection?.()
+  if (!current || !llm || typeof controller?.selectModel !== 'function' || !fallback) return null
+  const available = async (s) => llm.listProviders().some((p) => p.id === s.provider) && (await llm.listModels(s.provider)).some((m) => m.id === s.model)
+  if (await available(current)) return null
+  if (!(await available(fallback))) throw new Error(`model ${current.provider}/${current.model} jest tu niedostepny, a domyslny ${fallback.provider}/${fallback.model} tez`)
+  const { selected } = await controller.selectModel({
+    sessionId,
+    provider: fallback.provider,
+    model: fallback.model,
+    ...(fallback.reasoningEffort === undefined ? {} : { reasoningEffort: fallback.reasoningEffort }),
+  })
+  return { from: `${current.provider}/${current.model}`, to: `${selected.provider}/${selected.model}` }
 }
 
 function titleOf(t) {
