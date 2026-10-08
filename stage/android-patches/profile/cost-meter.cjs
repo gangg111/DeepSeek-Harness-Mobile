@@ -12,6 +12,7 @@ const vm = require('vm');
 
 const MARK = '/*[android] cost-meter pl*/';
 const USD_MARK = '/*[android] cost-meter usd*/';
+const FIT_MARK = '/*[android] cost-meter fit*/';
 
 function write(file, text) {
   // Zapis przez plik tymczasowy + rename: nie zmienia pliku, który pnpm mógł dowiązać z magazynu pakietów.
@@ -33,12 +34,64 @@ function patchDefaultCurrency(lib) {
   return true;
 }
 
+// Okienko godzin szczytu (`.cm-peak-alert`, position:fixed, 340 px, right:20px) siedzi na telefonie w wysuwanym pasku bocznym,
+// który ma `transform` — wtedy „fixed” liczy się względem paska (~320 px), nie ekranu, i okienko wystaje w lewo poza ekran.
+// Szerokość ograniczona do kontenera (100% = pasek albo ekran, gdy przodek nie ma transform).
+function patchAlertFit(lib) {
+  const file = path.join(lib, 'client.js');
+  const s = fs.readFileSync(file, 'utf8');
+  if (s.includes(FIT_MARK)) return false;
+  const rule = '.cm-peak-alert.cm-peak-alert-corner{right:20px;bottom:20px}';
+  if (s.split(rule).length !== 2) throw new Error('client.js: brak stylu okienka w rogu');
+  write(file, FIT_MARK + s.replace(rule, '.cm-peak-alert.cm-peak-alert-corner{right:20px;bottom:20px;max-width:calc(100% - 40px);box-sizing:border-box}'));
+  return true;
+}
+
+// Saldo konta DeepSeek: konto może mieć dwa portfele (CNY i USD), a plugin przy dwóch niezerowych zawsze bierze CNY
+// (pickBalanceInfo w store.js) — przy doładowaniu w dolarach i małej kwocie w juanach pokazywał więc tylko juany.
+// Łatka: najpierw portfel w walucie wyświetlania z ustawień pluginu (ledger.config.currency), jeśli ma saldo; potem reguła
+// pluginu bez zmian. Kwota zawsze prawdziwa, bez przeliczania walut.
+const PICK_MARK = '/*[android] cost-meter wallet*/';
+function patchBalancePick(lib) {
+  const store = path.join(lib, 'store.js'), index = path.join(lib, 'index.js');
+  const ss = fs.readFileSync(store, 'utf8'), si = fs.readFileSync(index, 'utf8');
+  if (ss.includes(PICK_MARK) && si.includes(PICK_MARK)) return false;
+  if (ss.includes(PICK_MARK) || si.includes(PICK_MARK)) throw new Error('częściowo nałożona — przeinstaluj plugin');
+  const pick = "  const cnyFirst = entries => entries.find(entry => String(entry.currency).toUpperCase() === 'CNY')\n  return cnyFirst(positive)";
+  const open = '  const ledger = Ledger.open()\n';
+  if (ss.split(pick).length !== 2) throw new Error('store.js: brak reguły wyboru portfela');
+  if (si.split(open).length !== 2) throw new Error('index.js: brak Ledger.open()');
+  write(store, PICK_MARK + '\n' + ss.replace(pick, () => "  const cnyFirst = entries => entries.find(entry => String(entry.currency).toUpperCase() === 'CNY')\n" +
+    "  const preferred = String(globalThis.__dshCostMeterLedger?.config?.currency ?? '').toUpperCase()\n" +
+    "  const display = positive.find(entry => String(entry.currency).toUpperCase() === preferred)\n" +
+    "  return display ?? cnyFirst(positive)"));
+  write(index, PICK_MARK + '\n' + si.replace(open, () => open + '  globalThis.__dshCostMeterLedger = ledger\n'));
+  return true;
+}
+
+// Build 63 przeliczał saldo CNY na walutę wyświetlania (≈ kurs 7,2) — wycofane, bo ukrywało prawdziwe saldo; cofnięcie tamtej
+// zmiany w client.js (opakowanie formattera X -> X$cny) na instalacjach, na których już jest.
+const BAL_MARK = '/*[android] cost-meter balance*/';
+function revertBalanceConversion(lib) {
+  const file = path.join(lib, 'client.js');
+  const s = fs.readFileSync(file, 'utf8');
+  if (!s.includes(BAL_MARK)) return false;
+  const re = /function ([\w$]+)\(t,s,o\)\{const c=typeof o=="string"\?o\.toUpperCase\(\):"";if\(c==="CNY"[^]*?return \1\$cny\(t,s,o\)\}function \1\$cny\(/;
+  const m = s.match(re);
+  if (!m) throw new Error('client.js: brak opakowania salda do cofnięcia');
+  write(file, s.replace(BAL_MARK, '').replace(m[0], () => `function ${m[1]}(`));
+  return true;
+}
+
 module.exports = function patchCostMeter(dir) {
   const lib = path.join(dir, 'lib');
   const done = [];
   try { if (patchDefaultCurrency(lib)) done.push('domyślnie USD') } catch (e) { done.push(`domyślna waluta pominięta (${e.message})`) }
   const pl = patchTranslation(lib);
   if (pl) done.unshift(pl);
+  try { if (revertBalanceConversion(lib)) done.push('cofnięte przeliczanie salda CNY') } catch (e) { done.push(`cofnięcie przeliczania salda nieudane (${e.message})`) }
+  try { if (patchBalancePick(lib)) done.push('saldo z portfela w walucie wyświetlania') } catch (e) { done.push(`wybór portfela pominięty (${e.message})`) }
+  try { if (patchAlertFit(lib)) done.push('okienko szczytu mieści się w pasku') } catch (e) { done.push(`okienko szczytu pominięte (${e.message})`) }
   return done.length ? done.join('; ') : null;
 };
 
