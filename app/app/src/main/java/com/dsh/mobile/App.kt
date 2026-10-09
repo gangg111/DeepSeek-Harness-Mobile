@@ -119,12 +119,15 @@ class App : Application() {
 
     fun serverEnv(): Map<String, String> {
         val home = File(filesDir, "home")
-        return toolsEnv(home) + mapOf(
+        // Zmienne systemu Android (ANDROID_ROOT/DATA/I18N_ROOT/TZDATA_ROOT, BOOTCLASSPATH…) jak w Termuxie: bez nich .NET (dotnet new) losowo pada SIGSEGV
+        val android = System.getenv().filterKeys { it.startsWith("ANDROID_") || it in setOf("BOOTCLASSPATH", "DEX2OATBOOTCLASSPATH", "SYSTEMSERVERCLASSPATH", "EXTERNAL_STORAGE") }
+        return android + toolsEnv(home) + mapOf(
             "HOME" to home.path,
             "DSH_HOME" to File(home, ".dsh").path,
             "TMPDIR" to cacheDir.path,
-            "LD_LIBRARY_PATH" to File(root, "lib").path,
-            "PATH" to File(root, "bin").path + ":/system/bin",
+            "LD_LIBRARY_PATH" to File(root, "lib").path + ":" + File(home, ".local/lib").path,   // ~/.local/lib: dsh-install
+            // ~/.local/bin: binarki wnoszone przez agenta i skrypty z `pip install --user`
+            "PATH" to File(home, ".local/bin").path + ":" + File(root, "bin").path + ":/system/bin",
             "LANG" to "en_US.UTF-8",
             // node z Termuxa ma wkompilowaną ścieżkę openssl.cnf w prefiksie Termuxa (nieczytelną z innej apki)
             "OPENSSL_CONF" to "/dev/null",

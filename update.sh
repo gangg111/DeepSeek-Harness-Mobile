@@ -109,6 +109,20 @@ step_stage() {
   log "komplet narzędzi (tools/root -> stage: zig, jdk, jadx, apktool, kotlin, git, ffmpeg, binutils…)"
   rm -rf "$STAGE/opt" "$STAGE/share" "$STAGE/libexec" "$STAGE/site-packages" "$STAGE/links.txt" "$STAGE/tools.env"
   "$ROOT/tools/merge-tools.sh" "$STAGE"
+  # dsh-install: pakiety Termuxa, które runtime już ma (biblioteka albo binarka w stage) -> pomijane jako zależności
+  mkdir -p "$STAGE/etc/dsh-install"
+  python3 - "$P/var/lib/dpkg/info" "$STAGE" > "$STAGE/etc/dsh-install/provided" <<'PY'
+import os, sys
+info, st = sys.argv[1:]
+for f in sorted(os.listdir(info)):
+    if not f.endswith(".list"): continue
+    paths = [l.strip() for l in open(os.path.join(info, f)) if l.strip()]
+    libs = [os.path.basename(x) for x in paths if os.path.dirname(x).endswith("/usr/lib") and ".so" in os.path.basename(x)]
+    bins = [os.path.basename(x) for x in paths if os.path.dirname(x).endswith("/usr/bin")]
+    if any(os.path.exists(os.path.join(st, "lib", l)) for l in libs) or any(os.path.exists(os.path.join(st, "bin", b)) for b in bins):
+        print(f[:-5].split(":")[0])
+PY
+  echo "dsh-install: pakiety z runtime: $(wc -l < "$STAGE/etc/dsh-install/provided")"
   ln -sfn "$DSH/node_modules" "$STAGE/node_modules"   # dla wrappera Termuxa (ścieżki pluginów w android.patch.yml); do zipa NIE wchodzi
   log "polski pakiet językowy (locale-pl/pl.json -> stage/dsh-locale-pl)"
   (cd "$ROOT/locale-pl" && node build-plugin.mjs >/dev/null)

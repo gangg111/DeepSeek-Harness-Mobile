@@ -22,3 +22,7 @@ app/local.properties
 *.log
 **/__pycache__/
 tsnet/dsh-tsnet-mobile
+
+# artefakty testów narzędzi (tools/test-tools.sh, symulator)
+/rt-test/
+/tt.*/

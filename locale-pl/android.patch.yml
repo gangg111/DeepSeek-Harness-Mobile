@@ -20,10 +20,25 @@
       bash 5.3 + GNU coreutils/findutils/grep/sed/gawk/diffutils/patch/tar/gzip/xz/bzip2/zip/unzip, rg, fd, jq, tree, file,
       curl, wget, git (HTTPS), make, cmake, GNU binutils (objdump, nm, readelf, strings, ar, ld, as),
       C/C++: cc/gcc/clang/c++/g++ (Zig-based clang; default target aarch64-linux-musl produces static binaries that run here; `zig` itself is available too),
+      .NET 10 SDK (`dotnet new/build/run`, C#; NuGet from nuget.org; built apps run via their apphost or `dotnet app.dll`) and PowerShell 7 (`pwsh`, cross-platform cmdlets only:
+      no registry/WMI/COM; startup ~4 s). Windows .exe/.bat cannot run here; port the logic to pwsh/C#/Python instead.
       Java: JDK 21 (java, javac, jar, javap, jshell, keytool), Kotlin (kotlinc), Android reverse engineering: jadx, apktool, d2j-dex2jar (and other d2j-* tools), aapt, aapt2,
       Python 3.14 with pip and numpy (pip installs pure-Python packages; packages needing native compilation will not build here),
-      Node.js 26 with npm/npx, sqlite3, openssl, ffmpeg/ffprobe.
-      There is no package manager (no apt/pkg); if a tool is truly absent, say so instead of trying to install it system-wide.
+      Node.js 26 with npm/npx and pnpm, sqlite3, openssl, ffmpeg/ffprobe,
+      Python packages Pillow (PIL), requests and meson; ninja, pkg-config, perl 5.42, autoconf/automake/autoreconf/libtoolize/m4,
+      patchelf, qemu-x86_64 (user-mode emulation of x86_64 Linux binaries, static and dynamic: a glibc x86_64 sysroot is preset via QEMU_LD_PREFIX),
+      socat, nmap (use -sT, no raw sockets) and ncat, gh (GitHub CLI), zstd, rsvg-convert (SVG to PNG), adb (Android Debug Bridge client, e.g. wireless debugging).
+      less, nano, tmux (detached sessions: `tmux new -d -s name 'cmd'`), ssh/scp/sftp/ssh-keygen/ssh-agent, rsync, dig (defaults to @8.8.8.8, there is no /etc/resolv.conf),
+      whois, iperf3, 7z, cabextract, sox and lame (audio), pngquant, graphviz `dot` (PNG/SVG/PDF diagrams). TERM defaults to dumb.
+      Cross-compiling for x86_64 Linux: `cc -target x86_64-linux-gnu` (dynamic glibc; run with `qemu-x86_64 ./prog`) or `-target x86_64-linux-musl -static`; same for c++.
+      proot (no root needed: fake root `proot -0`, bind mounts `-b host:guest`, alternate rootfs `-r dir`). Docker is impossible here, but an extracted
+      x86_64 Linux rootfs or image layers can be run instead: `proot -q qemu-x86_64 -r <rootfs> -b /proc -b /dev <cmd>`.
+      Shebangs `#!/usr/bin/env <interp>` and `#!/bin/sh` work (exec is redirected to the bundled tools), but /usr/bin/env is not a real file
+      and a writable /tmp does not exist: use $TMPDIR for temporary files. ~/.local/bin is first on PATH.
+      Missing CLI tool: `dsh-install <pkg>...` installs Termux packages (aarch64, verified signature + SHA256) with dependencies into ~/.local
+      and reports `--version` of each new binary; `dsh-install -s <word>` searches, `-l` lists, `-r <pkg>` removes, `-f <pkg>` reinstalls and re-checks. There is no apt/pkg and no root.
+      A program installed this way may still look for data/config files under /data/data/com.termux (dsh-install lists such paths) — then pass
+      the path via its option or environment variable. Python packages: `python3 -m pip install`.
 
 # Pluginy społeczności (zainstalowane npm-em w node_modules dsh). Nazwy pakietów NIE są widoczne z katalogu profilu,
 # więc każdy wskazujemy ścieżką pliku (main z package.json) względem tej nakładki: rt/node_modules/... (w Termuxie stage/node_modules -> dsh-test).
