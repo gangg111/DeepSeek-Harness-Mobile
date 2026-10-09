@@ -2,9 +2,9 @@
 
 **[English](README.md) · Polski**
 
-**DeepSeek Harness w jednej apce na telefon, bez Termuxa i roota, po polsku, z kompletem narzędzi programistycznych.**
+**DeepSeek Harness w jednej apce na telefon, bez Termuxa i roota, po polsku, z kompletem narzędzi programistycznych (także .NET 10 i PowerShell 7) i ekranem Code, który przenosi sesje razem z plikami projektu między komputerem a telefonem.**
 
-*English summary: a self-contained Android APK that runs the full [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) on-device with a bundled toolchain, a Polish language pack, community plugins, Edge TTS, an in-app updater and a **Code** screen that opens sessions from your computers over a built-in Tailscale node. Full English README: [README.md](README.md).*
+*English summary: a self-contained Android APK that runs the full [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) on-device with a bundled toolchain, a Polish language pack, community plugins, Edge TTS, an in-app updater, `dsh-install` for Termux packages, .NET 10 and PowerShell 7, and a **Code** screen that opens sessions from your computers and carries them to the phone together with their project files, kept in sync, over a built-in Tailscale node. Full English README: [README.md](README.md).*
 
 ---
 
@@ -24,7 +24,12 @@ Apka pakuje w jeden plik APK:
 - **narzędzia dla modelu**, wszystkie na `PATH` narzędzia `bash`:
   - kompilatory: `cc`/`gcc`/`clang`/`c++`/`g++` (Zig, statyczne binarki działające na Androidzie), JDK 21 (`java`, `javac`, `jar`, `javap`, `jshell`), `kotlinc`, Python 3.14 z pip i numpy, Node 26 z npm/npx i pnpm, `make`, `cmake`,
   - inżynieria wsteczna: `jadx`, `apktool`, `d2j-dex2jar` i reszta dex2jar, `aapt`, `aapt2`, GNU binutils (`objdump`, `nm`, `readelf`, `strings`, `ar`, `ld`, `as`),
-  - system: GNU coreutils, `sed`, `gawk`, `grep`, `find`, `diff`, `patch`, `tar`, `gzip`, `xz`, `bzip2`, `zip`, `unzip`, `rg`, `fd`, `jq`, `tree`, `file`, `curl`, `wget`, `git` (HTTPS), `sqlite3`, `openssl`, `ffmpeg`, `ffprobe`,
+  - .NET 10 SDK (`dotnet new/build/run`, natywna wersja na Androida z Termuxa) i PowerShell 7 (`pwsh`),
+  - system: GNU coreutils, `sed`, `gawk`, `grep`, `find`, `diff`, `patch`, `tar`, `gzip`, `xz`, `bzip2`, `zip`, `unzip`, `7z`, `zstd`, `rg`, `fd`, `jq`, `tree`, `file`, `less`, `nano`, `tmux`, `curl`, `wget`, `git` (HTTPS), `gh`, `ssh`/`scp`/`sftp`, `rsync`, `dig`, `whois`, `socat`, `nmap`, `iperf3`, `sqlite3`, `openssl`, `ffmpeg`, `ffprobe`, `sox`, `lame`, `pngquant`, `rsvg-convert`, graphviz `dot`,
+  - budowanie i emulacja: `perl`, autotools, `meson`, `ninja`, `pkg-config`, `patchelf`, `qemu-x86_64` z sysrootem glibc x86_64 (binarki skompilowane `cc -target x86_64-linux-gnu` działają na telefonie), `proot` (udawany root, montowanie katalogów, rootfs x86_64 zamiast Dockera), `adb`,
+  - `dsh-install <pakiet>`: instaluje dowolny inny pakiet Termuxa (z zależnościami) do `~/.local`, sprawdzany jak w apt (podpis GnuPG indeksu repozytorium, SHA256 indeksu i każdego pakietu), i sprawdza nowe binarki; `-s` szukanie, `-l` lista, `-r` usuwanie, `-f` ponowna instalacja,
+  - ścieżki Termuxa bez obejść: shebangi `#!/usr/bin/env …` i `#!/bin/sh` działają bez zmian (termux-exec), narzędzia uruchamiające powłokę (`tar -z`, `make`, hooki i aliasy gita, `system()` w `awk`/`perl`) używają `/system/bin/sh`, Java dostaje katalog tymczasowy i domowy apki,
+- **`xdg-open <plik>`** dla agenta: otwiera wynik (PDF, obraz, film, dokument) w aplikacji na telefonie przez systemowy wybór aplikacji; pliki `.md` otwierają się we wbudowanym czytniku/edytorze,
 - **pluginy społeczności**: mobilny UI (dsh-qol), pamięć między sesjami, cofanie tur z przywracaniem plików, bezpieczniki pętli (repeat-stop, tool-budget), 87 skilli inżynierii wstecznej, edycja plików diffem, zegar w kontekście, lista zadań między turami, most MCP po stdio, TTS (Edge TTS z polskimi głosami, równoległa synteza fragmentów),
 - **działający menedżer pluginów**: dzięki dołączonemu pnpm „Pluginy → Dodaj plugin” instaluje pluginy z npm i z GitHuba tak jak na komputerze; pokazują się w grupie „Zainstalowane” i tam można je odinstalować (pluginy wbudowane w APK działają dalej, ale nie są tam wymienione),
 - **usługę pierwszoplanową**, która trzyma serwer w tle (powiadomienie z przyciskami „Zatrzymaj" i „Aktualizuj"),
@@ -32,13 +37,13 @@ Apka pakuje w jeden plik APK:
 
 ## Instalacja
 
-1. Pobierz `dsh-mobile.apk` z [Releases](../../releases) (ok. 600 MB).
+1. Pobierz `dsh-mobile.apk` z [Releases](../../releases) (ok. 890 MB).
 2. Zezwól menedżerowi plików na instalację z nieznanych źródeł i zainstaluj. Kolejne aktualizacje przychodzą już z apki; za pierwszym razem Android prosi o zgodę „Instaluj nieznane aplikacje” dla DeepSeek Harness.
-3. Pierwsze uruchomienie rozpakowuje ok. 1,3 GB (60 tys. plików) do pamięci apki. Trwa kilka minut, postęp widać na liczniku. Kolejne starty trwają kilka sekund.
+3. Pierwsze uruchomienie rozpakowuje ok. 2,1 GB (57 tys. plików) do pamięci apki. Trwa kilka minut, postęp widać na liczniku. Kolejne starty trwają kilka sekund.
 4. Zezwól na dostęp do plików: agent pracuje domyślnie w `Pobranych`, tam też apka zapisuje log (`Download/dsh_log.txt`).
 5. Wpisz klucz API DeepSeek w oknie powitalnym harnessu.
 
-Wymagania: Android 9+ (targetSdk 28 celowo, patrz niżej), arm64, ok. 2 GB wolnego miejsca.
+Wymagania: Android 9+ (targetSdk 28 celowo, patrz niżej), arm64, ok. 3,5 GB wolnego miejsca.
 
 ## Użycie
 
@@ -53,6 +58,9 @@ Wymagania: Android 9+ (targetSdk 28 celowo, patrz niżej), arm64, ok. 2 GB wolne
 - Interfejs jest powiększony 1,2× względem wersji przeglądarkowej (meta viewport: szerokość strony = ekran/1,2; stała `UI_ZOOM` w `MainActivity.kt`), a paski systemowe Androida przyjmują kolor tła strony.
 - Klawiatura w polach dsh działa bez podpowiedzi, autokorekty i pisania gestem (WebView zgłasza pole jako „widoczne hasło”): edytor kompozytora (Lexical) z klawiaturą składającą słowa, np. Samsung, zaznaczał pierwszą literę i nadpisywał ją następną (Lexical #7210). Bez składania słów błąd nie występuje.
 - **Code** (pasek boczny): sesje DeepSeek Harness z Twoich komputerów. Pierwszy raz: „Zaloguj Tailscale” (otwiera się przeglądarka systemowa, apka staje się urządzeniem `dsh-mobile` w tailnecie). Komputery z wtyczką [`dsh-remote-control`](https://github.com/gangg111/dsh-remote-control) pojawiają się same; dotknięcie sesji otwiera ją z pełną historią, wiadomości i zdjęcia działają jak na PC. „Dodaj urządzenie” to zapas do wpisania adresu ręcznie. Gdy węzeł nie jest zalogowany, a apka Tailscale (VPN) jest włączona, działa stara droga bezpośrednia.
+- **Sesje razem z plikami projektu** (z [`dsh-remote-control`](https://github.com/gangg111/dsh-remote-control) 0.7.0+ na PC): sesja wysłana z komputera trafia na telefon z całym katalogiem projektu (poza wynikami budowania, zależnościami, sekretami, binarkami i plikami ponad 5 MB) w `~/<projekt>`, osobnym obszarze roboczym, który staje się katalogiem roboczym sesji, więc agent pracuje dalej na tych samych plikach; w prompcie dostaje też informację, która ścieżka na komputerze odpowiada której na telefonie. Ponowne wysłanie tej samej synchronizowanej sesji aktualizuje istniejącą kopię. Gdy sesja jest synchronizowana, pliki idą razem z pisaniem: przy przejęciu przez telefon najpierw przychodzi to, co zmieniło się na PC; przy przejęciu przez komputer telefon najpierw odsyła to, co zmieniło się na telefonie (także pliki zrobione poleceniami powłoki). Plik, którego nikt nie ruszał od ostatniego przeniesienia, jest podmieniany po cichu; plik zmieniony po obu stronach zachowuje drugą wersję obok jako `*.przed-importem-<data>`. Dopóki pliki nie dojdą i nie zostaną potwierdzone, pisanie zostaje tam, gdzie jest, więc stara kopia nigdy nie nadpisze nowszej pracy.
+- Transfery pokazują postęp: strzałka (do albo z telefonu) z cienkim paskiem przy sesji, pasek nad polem pisania i na ekranie Code oraz animowana ikona Code w pasku bocznym.
+- Usunięcie sesji („Usuń sesję” z wtyczki archiwum) kasuje ją z dysku; sesja nadal synchronizowana z komputerem jest odrzucana z komunikatem „najpierw odłącz synchronizację” (ikona komputera przy sesji).
 
 ## Jak to działa
 
@@ -61,7 +69,7 @@ APK
 ├── assets/payload.zip           (stored, ~610 MB) → rozpakowany do filesDir/rt przy pierwszym starcie
 │   ├── bin/  node bash python3 …  + wrappery (cc, javac, jadx, npm …)
 │   ├── lib/  *.so z Termuxa (domknięcie NEEDED), python3.14/, node_modules/npm
-│   ├── opt/  jdk, zig, jadx, apktool, kotlin, dex2jar
+│   ├── opt/  jdk, zig, jadx, apktool, kotlin, dex2jar, dotnet (SDK 10), pwsh (PowerShell 7), x86_64-sysroot
 │   ├── node_modules/            dsh + pluginy (npm)
 │   ├── dsh-locale-pl/           plugin z polskim pakietem językowym
 │   ├── android.patch.yml        nakładka profilu: pluginy, prompt systemowy, locale
@@ -71,6 +79,7 @@ APK
 │   ├── android-prebuilt/        pty.node, system.node (flock) — prekompilowane addony
 │   ├── android-update.mjs       aktualizator w apce
 │   ├── tools.env, links.txt     zmienne środowiska i dowiązania odtwarzane po rozpakowaniu
+│   ├── etc/dsh-install/provided pakiety Termuxa obecne w runtime (pomijane jako zależności)
 │   └── etc/tls/cert.pem
 ├── ServerService                foreground service: node … dsh --profile web --patch rt/android.patch.yml --port 3090
 └── MainActivity                 WebView z adresem serwera (token ze stdout)
@@ -89,6 +98,11 @@ Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 | brak sandboxa (Landlock/bwrap) | `DSH_PERMISSION_MODE=danger-full-access` |
 | zip nie przenosi dowiązań | `links.txt` odtwarzany przez `Os.symlink` |
 | skrypty z shebangiem Termuxa | `#!/system/bin/sh` + exec przez wbudowanego basha |
+| skrypty agenta z `#!/usr/bin/env …` albo `#!/bin/sh` (nie ma `/usr` ani roota) | termux-exec (`LD_PRELOAD`, `TERMUX__PREFIX=rt`) przepisuje ścieżkę interpretera przy exec; `bin/sh` → bash |
+| 28 binarek uruchamia powłokę przez wkompilowane `$PREFIX/bin/sh` (tar -z, make, hooki i aliasy gita, `system()` w awk/perl, cmake, ninja…) | napis w binarkach podmieniony na `/system/bin/sh` (ta sama długość, dopełnienie zerami) |
+| `7z` ładuje kodeki z `$PREFIX/libexec/7zip/7z.so`; `dig` przerywa na nieczytelnym `resolv.conf` Termuxa | samodzielny `7zz` jako `7z`; ścieżka w `dig` podmieniona na `/dev/null` (serwer `@8.8.8.8` z wrappera) |
+| JDK Termuxa ma `java.io.tmpdir` i `user.home` w Termuxie | wrappery Javy podają `TMPDIR` i `HOME` apki |
+| .NET ładuje ICU po nazwach bez wersji i inaczej bierze ICU Androida z `/apex` (SIGABRT); PowerShell ma `libpsl-native` tylko pod glibc | dowiązania ICU bez wersji w `lib/`; `libpsl-native` zbudowane z PowerShell-Native pod bionic; `DOTNET_ROOT`, bez „pierwszego uruchomienia” |
 | `koffi` w wersji bez binarki android-arm64 (dsh ≥ 0.2.0 przypina 3.1.1) | `overrides` w package.json na najnowszą wersję tej samej linii głównej, która binarkę ma |
 | npm po aktualizacji dsh zagnieżdża `@deepseek-ai/*` pod `@deepseek-ai/dsh/node_modules`, pluginy nie znajdują `@deepseek-ai/dsh-tools` | `android-hoist.mjs`: dowiązania na górze do zagnieżdżonych pakietów (w APK odtwarzane z `links.txt`) |
 | `node-addon-require-builtin` (dsh ≥ 0.2.0) bez wariantu android-arm64 i bez źródeł | pakiet JS `node-addon-require-builtin-android-arm64`, który pod `--expose-internals` zwraca wewnętrzne moduły zwykłym `require()` |
@@ -103,7 +117,7 @@ Obejścia potrzebne, żeby Node i dsh z Termuxa działały w innej apce:
 
 ## Budowanie ze źródeł (Termux, arm64)
 
-Wymagania: Termux z `nodejs` (26), `python` (3.14), `clang`, `openjdk-21`, `git`, `zip`, `aapt2`, `apksigner`, `gradle` przez wrapper projektu, oraz pakiety narzędzi kopiowanych do payloadu (`binutils`, `ripgrep`, `fd`, `jq`, `tree`, `file`, `ffmpeg`, `sqlite`, `kotlin`, `dex2jar`, `cmake`, `make`, `python-numpy`…). Pułapki Gradle/aapt2 na Termuxie opisuje `app/gradle.properties`.
+Wymagania: Termux z `nodejs` (26), `python` (3.14), `clang`, `openjdk-21`, `golang`, `dotnet-sdk-10.0`, `gnupg` (gpgv), `git`, `zip`, `aapt2`, `apksigner`, `gradle` przez wrapper projektu, oraz pakiety narzędzi kopiowanych do payloadu (`binutils`, `ripgrep`, `fd`, `jq`, `tree`, `file`, `ffmpeg`, `sqlite`, `kotlin`, `dex2jar`, `cmake`, `make`, `python-numpy`…). Pułapki Gradle/aapt2 na Termuxie opisuje `app/gradle.properties`.
 
 ```sh
 # 1. instalacja dsh z łatkami pod Androida (raz; potem robi to update.sh)
@@ -117,7 +131,7 @@ tools/build-tools.sh
 `update.sh` zapisuje podpisany APK w `/sdcard/Download/dsh-mobile.apk`. Podpis release używa klucza `~/.android/ciuchy-release.jks` (alias `ciuchy`, hasło w `~/.android/ciuchy-release.pass`); zmień `signingConfigs` w `app/app/build.gradle.kts` na własny klucz albo użyj `--debug`.
 Obok APK zapisuje `dsh-mobile.apk.md5` i `dsh-mobile.json` (`versionCode`, `versionName`, `md5`, `size`). Każde wydanie musi mieć `dsh-mobile.json` obok `dsh-mobile.apk`, inaczej aktualizator w apce go nie zauważy; o nowości decyduje `versionCode`, więc assety można podmieniać w miejscu pod tym samym tagiem. Najpierw wgraj APK i `.md5`, a `dsh-mobile.json` na końcu, żeby żaden telefon nie zobaczył nowej wersji, zanim jej APK będzie na miejscu.
 
-Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku). `update.sh` przed pakowaniem sam testuje start dsh na gotowym runtime.
+Testy: `tools/test-tools.sh <rt>` (85 testów narzędzi w czystym środowisku), `go test ./...` w `tsnet/`, `node --test` w `code/dsh-code`. `update.sh` przed pakowaniem sam testuje start dsh na gotowym runtime.
 
 ## Tłumaczenie
 
@@ -127,10 +141,11 @@ Testy: `tools/test-tools.sh <rt>` (38 testów narzędzi w czystym środowisku). 
 
 ## Ograniczenia
 
-- Apka nie ma menedżera pakietów: pip buduje tylko czyste pakiety Pythona, npm i pnpm instalują tylko pakiety bez części natywnej (dotyczy to też pluginów dodawanych z menedżera pluginów).
+- Nie ma apt/pkg ani roota: `dsh-install` obsługuje pakiety Termuxa, ale pakiet może szukać swoich danych pod `/data/data/com.termux` (wypisuje takie ścieżki); pip buduje tylko czyste pakiety Pythona, npm i pnpm instalują tylko pakiety bez części natywnej (dotyczy to też pluginów dodawanych z menedżera pluginów).
+- Windowsowe `.exe`/`.bat` nie działają (bez Wine); PowerShell ma tylko polecenia wieloplatformowe (bez rejestru, WMI, COM). Nie ma zapisywalnego `/tmp`, a `/usr/bin/env` nie jest prawdziwym plikiem (exec i tak działa); używaj `$TMPDIR`.
 - Aktualizator w apce wymaga tej samej wersji `node-pty` co prekompilowana; przy innej odsyła do `update.sh` w Termuxie (tam jest kompilator).
 - Przy 30 równoległych połączeniach i bardzo długich odpowiedziach Microsoft może odrzucać część z nich; plugin ponawia fragment, a w ostateczności go pomija.
-- Rozmiar: APK ok. 620 MB, po rozpakowaniu ok. 1,3 GB; razem z APK potrzeba ok. 2 GB wolnego miejsca.
+- Rozmiar: APK ok. 890 MB, po rozpakowaniu ok. 2,1 GB; razem z APK potrzeba ok. 3,5 GB wolnego miejsca.
 - dsh 0.2.0 wyłącza jako niezgodne pluginy `dsh-memory-connect` (pamięć między sesjami) i `dsh-reverse-skill` (skille inżynierii wstecznej): ich autorzy deklarują zgodność tylko z dsh 0.1.x. Wrócą, gdy pojawią się zgodne wersje.
 - Ekran Code: wejście do pośrednika działa tylko z ekranu Code (ciasteczko SameSite=Strict), a komputer musi mieć włączone „HTTPS Certificates” w tailnecie, inaczej `tls: internal error`.
 
@@ -151,6 +166,14 @@ Kod tej apki: MIT. APK zawiera oprogramowanie osób trzecich na ich licencjach:
 | bash, coreutils, findutils, grep, sed, gawk, diffutils, patch, tar, gzip, make, binutils, wget (Termux) | GPLv3 |
 | git | GPLv2 |
 | pnpm | MIT |
+| .NET 10 SDK i runtime (wersja Termuxa), PowerShell 7 | MIT |
+| termux-exec | Apache 2.0 |
+| 7-Zip (`7zz`) | LGPL 2.1+ z ograniczeniem unRAR |
+| GnuPG (`gpgv`), less, nano, rsync, pngquant | GPLv3 |
+| QEMU (tryb użytkownika), proot, perl, autotools, sox | GPLv2 / Artistic (perl) / GPL·LGPL (sox) |
+| OpenSSH, tmux, BIND `dig`, graphviz, nmap, lame, `gh`, `adb` | odpowiednio BSD / ISC / MPL 2.0 / EPL / NPSL / LGPL / MIT / Apache 2.0 |
+| glibc, libgcc, libstdc++ (Debian, sysroot x86_64 dla qemu) | LGPL / GPL z wyjątkiem runtime |
+| marked (czytnik Markdown) | MIT |
 | Tailscale (`tsnet`) i biblioteki Go programu `dsh-tsnet-mobile` | BSD-3-Clause; zależności wg ich licencji (BSD/MIT/Apache 2.0) |
 | ffmpeg | LGPL/GPL (build Termuxa) |
 | curl, openssl, sqlite, zip/unzip, xz, bzip2, jq, ripgrep, fd, tree, file, cmake | licencje własne (MIT/BSD/zlib i podobne) |
@@ -161,11 +184,11 @@ Binarki pochodzą z pakietów Termuxa (https://github.com/termux/termux-packages
 ## Struktura repozytorium
 
 ```
-app/            projekt Gradle (Kotlin): App.kt, ServerService.kt, MainActivity.kt, ApkUpdater.kt (aktualizacja apki z wydań)
+app/            projekt Gradle (Kotlin): App.kt, ServerService.kt, MainActivity.kt, ApkUpdater.kt (aktualizacja apki z wydań), Opener.kt (xdg-open), MdActivity.kt (czytnik Markdown)
 stage/          runtime i pliki payloadu (bez node_modules — te są w ~/dsh-test)
-tools/          build-tools.sh, merge-tools.sh, apply-links.sh, test-tools.sh, root/ (wynik)
+tools/          build-tools.sh, merge-tools.sh, apply-links.sh, test-tools.sh, dsh-install.py, zig-cc-wrapper.sh, root/ (wynik)
 locale-pl/      polski pakiet językowy: extract-en.mjs, pl-*.json, build-plugin.mjs, android.patch.yml
-code/dsh-code/  plugin ekranu Code (host: index.js, tsnet.js, discover.js; klient: client.js; testy node)
+code/dsh-code/  plugin ekranu Code (host: index.js, tsnet.js, discover.js; klient: client.js; vendor/: wspólne moduły przenoszenia z dsh-remote-control; testy node)
 tsnet/          dsh-tsnet-mobile: wbudowany węzeł Tailscale w Go (tsnet, pośrednik, API sterujące, testy)
 tap-outside/    plugin zamykania panelu bocznego dotknięciem obok
 update.sh       pełny przebieg budowania i aktualizacji
