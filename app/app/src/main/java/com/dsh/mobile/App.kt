@@ -26,6 +26,7 @@ class App : Application() {
         super.onCreate()
         try { logFile.writeText("--- start ${java.util.Date()}\n") } catch (_: Throwable) {}
         try { val pi = packageManager.getPackageInfo(packageName, 0); log("build: versionName ${pi.versionName}, versionCode ${pi.longVersionCode}, payload $PAYLOAD_VERSION") } catch (_: Throwable) {}
+        Opener.start(this)
         ServerService.start(this)
     }
 

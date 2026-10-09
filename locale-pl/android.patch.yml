@@ -35,6 +35,7 @@
       x86_64 Linux rootfs or image layers can be run instead: `proot -q qemu-x86_64 -r <rootfs> -b /proc -b /dev <cmd>`.
       Shebangs `#!/usr/bin/env <interp>` and `#!/bin/sh` work (exec is redirected to the bundled tools), but /usr/bin/env is not a real file
       and a writable /tmp does not exist: use $TMPDIR for temporary files. ~/.local/bin is first on PATH.
+      `xdg-open <file>` opens a file (PDF, image, video, document…) in an app on the user's phone via a chooser; use it when the user wants to view a result.
       Missing CLI tool: `dsh-install <pkg>...` installs Termux packages (aarch64, verified signature + SHA256) with dependencies into ~/.local
       and reports `--version` of each new binary; `dsh-install -s <word>` searches, `-l` lists, `-r <pkg>` removes, `-f <pkg>` reinstalls and re-checks. There is no apt/pkg and no root.
       A program installed this way may still look for data/config files under /data/data/com.termux (dsh-install lists such paths) — then pass

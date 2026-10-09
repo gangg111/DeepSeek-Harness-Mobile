@@ -146,6 +146,8 @@ PY
   [ -d "$P/lib/node_modules/pnpm" ] || { echo "BŁĄD: brak pnpm (pkg install pnpm)"; exit 1; }
   cp -r "$P/lib/node_modules/pnpm" "$STAGE/lib/node_modules/pnpm"
   printf '#!/system/bin/sh\nd=${0%%/*}\nexec "$d/node" "$d/../lib/node_modules/pnpm/bin/pnpm.cjs" "$@"\n' > "$STAGE/bin/pnpm"; chmod 755 "$STAGE/bin/pnpm"
+  # xdg-open: otwieranie plików w aplikacjach telefonu przez apkę (Opener.kt); woła je też łatka native-open-android.
+  printf '#!/system/bin/sh\nd=${0%%/*}\nexec "$d/node" "$d/../android-xdg-open.mjs" "$@"\n' > "$STAGE/bin/xdg-open"; chmod 755 "$STAGE/bin/xdg-open"
   mkdir -p "$STAGE/android-prebuilt"
   cp "$DSH/node_modules/node-pty/build/Release/pty.node" "$STAGE/android-prebuilt/pty.node"
   ver node-pty > "$STAGE/android-prebuilt/node-pty.version"

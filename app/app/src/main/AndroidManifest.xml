@@ -19,6 +19,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Czytnik/edytor .md (MdActivity + assets/md); nieeksportowany, otwiera go tylko Opener i linki z dokumentu. -->
+        <activity android:name=".MdActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode" />
         <service android:name=".ServerService" android:exported="false" />
+        <!-- xdg-open z serwera dsh (Opener.kt): pliki dla innych apek tylko z nadanym uprawnieniem do URI. -->
+        <provider android:name=".FilesProvider" android:authorities="com.dsh.mobile.files"
+            android:exported="false" android:grantUriPermissions="true" />
     </application>
 </manifest>
