@@ -20,6 +20,8 @@ import { join } from 'node:path'
 import { openUrl, startTsnet, tsnetBinaryPath } from './tsnet.js'
 import { MAX_PARALLEL, acceptProbe, hostOf, nextDue, planProbes, recordFailure, runLimited } from './discover.js'
 import { createDshClient, importSession } from './vendor/transfer.js'
+import { applyWorkspaceZip, collectFiles, diffAgainstBase, readWorkspaceZip, safeRelSegments } from './vendor/workspace-files.js'
+import { writeZip } from './vendor/zipwrite.js'
 import { appendTail, guardTurnStart, readTail, reloadSession, SeqMap, sessionState } from './vendor/sync.js'
 import { createRequire } from 'node:module'
 
@@ -113,8 +115,8 @@ export function apply(ctx) {
   function load() {
     try {
       const d = JSON.parse(readFileSync(file, 'utf8'))
-      return { devices: Array.isArray(d.devices) ? d.devices : [], cache: d.cache && typeof d.cache === 'object' ? d.cache : {}, ignored: Array.isArray(d.ignored) ? d.ignored : [] }
-    } catch { return { devices: [], cache: {}, ignored: [] } }
+      return { devices: Array.isArray(d.devices) ? d.devices : [], cache: d.cache && typeof d.cache === 'object' ? d.cache : {}, ignored: Array.isArray(d.ignored) ? d.ignored : [], imports: d.imports && typeof d.imports === 'object' ? d.imports : {}, bases: d.bases && typeof d.bases === 'object' ? d.bases : {}, pullPending: d.pullPending && typeof d.pullPending === 'object' ? d.pullPending : {} }
+    } catch { return { devices: [], cache: {}, ignored: [], imports: {}, bases: {}, pullPending: {} } }
   }
   function save() {
     mkdirSync(home, { recursive: true })
@@ -227,19 +229,186 @@ export function apply(ctx) {
     }
   }
   const transferLog = { warn: (m) => console.log(m) }
+
+  // --- Postęp transferów (widok na telefonie): bajty pobrań względem content-length i bajty oddane z ciała wysyłki ---
+  const active = new Map()   // id -> { sessionId, dir: 'in'|'out', bytes, total, title, device, at }
+  let activeSeq = 0
+  function track(info) { const id = ++activeSeq; const e = { ...info, bytes: 0, at: Date.now() }; active.set(id, e); return [id, e] }
+  /** Treść odpowiedzi jako Buffer, z licznikiem odebranych bajtów (zamiast res.arrayBuffer()). */
+  async function readTracked(res, info) {
+    const [id, e] = track({ ...info, total: Number(res.headers.get('content-length')) || null })
+    try {
+      if (!res.body) return Buffer.from(await res.arrayBuffer())
+      const chunks = [], reader = res.body.getReader()
+      for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength)); e.bytes += value.byteLength }
+      return Buffer.concat(chunks)
+    } finally { active.delete(id) }
+  }
+  /** Ciało wysyłki porcjami po 64 KB z licznikiem bajtów pobranych przez fetch; `end()` po odpowiedzi. */
+  function trackedUpload(buf, info) {
+    const [id, e] = track({ ...info, total: buf.length })
+    let off = 0
+    const body = new ReadableStream({ pull(c) { if (off >= buf.length) { c.close(); return } const n = Math.min(65536, buf.length - off); c.enqueue(new Uint8Array(buf.buffer, buf.byteOffset + off, n)); off += n; e.bytes = off } })
+    return { init: { body, duplex: 'half' }, end: () => active.delete(id) }
+  }
+
+  // --- Pliki projektu z sesją z komputera (faza 1, lib/vendor/workspace-files.js) ---
+  // Katalog docelowy: $HOME/<origin.name> jako OSOBNY obszar roboczy (workspaceRegistry.create, idempotentne dla tej
+  // samej ścieżki), a zaimportowana sesja dostaje go jako cwd — DSH przypina sesję do obszaru tylko przy równej ścieżce.
+  async function projectTarget(manifest) {
+    const segs = safeRelSegments(String(manifest?.origin?.name ?? ''), 'win32')   // ostrzejsze reguły niż android
+    const name = segs && segs.length === 1 && !segs[0].startsWith('.') ? segs[0] : 'projekt'
+    const dir = join(process.env.HOME || homedir(), name)
+    mkdirSync(dir, { recursive: true })
+    const ws = await ctx.get('workspaceRegistry').create(dir, name)
+    return { id: ws.id, path: ws.path ?? dir }
+  }
+  // Sumy plików z ostatniego przeniesienia w którąkolwiek stronę (`bases[dir][ścieżka]`): applyWorkspaceZip({ base })
+  // nadpisuje bez kopii plik niezmieniony od tego czasu; kopia *.przed-importem-* tylko dla zmian zrobionych na telefonie.
+  function rememberBase(dir, manifest, report) {
+    const landed = new Set([...report.created, ...report.written, ...report.conflicts.map((c) => c.path)])   // grupy rozłączne (c77193f)
+    const base = { ...(data.bases?.[dir] ?? {}) }
+    for (const f of manifest.files ?? []) if (landed.has(f.path)) base[f.path] = f.sha256
+    data.bases = { ...(data.bases ?? {}), [dir]: base }
+  }
+  // Notka dla agenta zaimportowanej sesji: kontekst promptu (jak dsh-clock-context), pusty dla innych sesji.
+  const importNote = (sessionId) => {
+    const m = sessionId && data.imports?.[sessionId]
+    if (!m) return ''
+    const clean = (v) => String(v ?? '').replace(/[{}]/g, '')
+    return `This session was moved here from the computer "${clean(m.from)}". Project files: ${m.originRoot ? `"${clean(m.originRoot)}" on the computer` : 'the computer project'} = "${clean(m.dir)}" on this phone ` +
+      `(${m.created} created, ${m.written} updated, ${m.conflicts} conflicts kept as *.przed-importem-*, ${m.skipped} skipped). ` +
+      (m.scope === 'project' ? 'The whole project directory came over except build outputs/dependencies (bin, obj, node_modules…), secrets, binaries and files over 5 MB.\n' : 'Only files the agent edited with tools came over; build outputs and shell-created files did not.\n') +
+      'Earlier turns ran on Windows (pwsh, .exe, C:\\ paths): here pwsh and dotnet work, but .exe and Windows-only tools do not; install missing CLI tools with `dsh-install`.'
+  }
+  ctx.inject?.(['systemPrompt'], (scope) => { scope.systemPrompt.context({ name: 'dsh-code-import', order: 90, text: (c) => importNote(c?.agent?.session?.id) }) })
   const importOptions = { emit: (event, payload) => ctx.emit(event, payload), removeSession, log: transferLog }
 
   async function deviceCaps(device) {
     const c = caps.get(device.id)
     if (c && Date.now() - c.at < CAPS_TTL_MS) return c
-    let list = []
-    try { const info = await remote(device, '/info'); if (Array.isArray(info.capabilities)) list = info.capabilities } catch {}
-    const entry = { at: Date.now(), transfer: list.includes('session-transfer'), sync: list.includes('session-sync') }
+    let list
+    // Pamiętamy tylko udaną odpowiedź: nieudane /info (zimne połączenie tsnet trwa > 6 s) zapamiętane na 10 min
+    // po cichu wyłączało odbiór sesji z komputera, mimo że ten je ogłaszał.
+    try { const info = await remote(device, '/info', { timeoutMs: 15000 }); list = Array.isArray(info.capabilities) ? info.capabilities : []; reachability(device, '/info') } catch (error) {
+      reachability(device, '/info', error)
+      return c ?? { at: 0, transfer: false, sync: false, files: false }
+    }
+    const entry = { at: Date.now(), transfer: list.includes('session-transfer'), sync: list.includes('session-sync'), files: list.includes('workspace-files'), filesReturn: list.includes('workspace-files-return'), filesPull: list.includes('workspace-files-pull'), filesPullAck: list.includes('workspace-files-pull-ack'), filesProject: list.includes('workspace-files-project') }
     caps.set(device.id, entry)
     return entry
   }
   async function supportsTransfer(device) { return (await deviceCaps(device)).transfer }
   async function supportsSync(device) { return (await deviceCaps(device)).sync }
+
+  /**
+   * Faza 2 (powrót): pliki projektu zmienione na telefonie od ostatniego importu (`bases[dir]`, także utworzone powłoką)
+   * jadą na PC przed oddaniem pisania: POST /links/:id/files (zdolność `workspace-files-return`). Bez tej zdolności
+   * albo bez katalogu z importu nic nie robimy. Błąd przerywa oddanie pisania (ponowienie w kolejnym obiegu).
+   */
+  async function returnFiles(device, link, phoneId) {
+    const imp = data.imports?.[phoneId]
+    const base = imp?.dir && data.bases?.[imp.dir]
+    if (!base || !(await deviceCaps(device)).filesReturn) return
+    // kopie konfliktów (*.przed-importem-*) i pliki robocze wyklucza sam moduł (`transfer-copy`, e5d320e)
+    const { paths, deleted, truncated } = diffAgainstBase(imp.dir, { files: Object.entries(base).map(([path, sha256]) => ({ path, sha256 })) })
+    if (paths.length === 0 && deleted.length === 0) return
+    const name = imp.dir.split('/').filter(Boolean).at(-1) ?? 'projekt'
+    // deleted informacyjnie: PC niczego nie kasuje
+    const { entries, manifest } = collectFiles({ root: imp.dir, scope: 'agent', paths, deleted, truncated, origin: { device: 'phone', root: imp.dir, name }, returnTo: { root: imp.originRoot ?? null } })
+    const up = trackedUpload(writeZip(entries), { sessionId: phoneId, dir: 'out', title: link.title ?? null, device: device.name })
+    let res, body
+    try {
+      res = await remoteFetch(device, `/links/${encodeURIComponent(link.linkId)}/files`, { method: 'POST', ...up.init, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS })
+      body = await res.json().catch(() => ({}))
+    } finally { up.end() }
+    if (!res.ok) throw new Error(`pliki projektu na ${device.name}: ${body.error ?? `HTTP ${res.status}`} — pisanie zostaje na telefonie`)
+    const next = { ...base }
+    for (const f of manifest.files) next[f.path] = f.sha256
+    data.bases[imp.dir] = next
+    save()
+    const r = body.report ?? {}
+    console.log(`[dsh-code] pliki projektu telefon → ${device.name}: ${manifest.files.length} wysłanych (${r.created?.length ?? '?'} nowych, ${r.written?.length ?? '?'} zaktualizowanych, ${r.conflicts?.length ?? 0} konfliktów na PC), ${manifest.skipped.length} pominiętych${deleted.length ? `, ${deleted.length} usuniętych na telefonie (PC ich nie kasuje)` : ''}`)
+  }
+
+  /**
+   * Po przejęciu pisania przez telefon: pliki zmienione na PC od ostatniego przeniesienia (GET /links/:id/files,
+   * zdolność `workspace-files-pull`) stosujemy z bazą sum, zanim agent na telefonie zacznie pracę. PC zapisuje bazę już
+   * przy wysyłce, więc nieudane pobranie zostawia `pullPending` i jest ponawiane w każdym obiegu (inaczej zwrot starej
+   * wersji z telefonu nadpisałby zmianę z PC bez kopii). Pliki usunięte na PC tylko logujemy.
+   */
+  async function pullFiles(device, linkId, phoneId) {
+    // tylko sesje z katalogiem projektu (przyszły z plikami); bez niego nie ma czego aktualizować
+    const caps = await deviceCaps(device)
+    if (!data.imports?.[phoneId]?.dir || !caps.filesPull) { if (data.pullPending[phoneId]) { delete data.pullPending[phoneId]; save() } return '' }
+    // ?ack=1 (workspace-files-pull-ack): PC przesuwa bazę dopiero po files-applied, więc pobranie bez zastosowania
+    // (np. apka zabita po GET) przy ponowieniu zwraca te same pliki zamiast pustej listy.
+    const ack = caps.filesPullAck
+    const query = [ack ? 'ack=1' : '', caps.filesProject ? 'scope=project' : ''].filter(Boolean).join('&')
+    const res = await remoteFetch(device, `/links/${encodeURIComponent(linkId)}/files${query ? `?${query}` : ''}`, { timeoutMs: TRANSFER_TIMEOUT_MS })
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error ?? `HTTP ${res.status}`) }
+    const zip = await readTracked(res, { sessionId: phoneId, dir: 'in', title: null, device: device.name })
+    const { manifest } = readWorkspaceZip(zip)
+    let note = '', applied = []
+    if (manifest.files?.length) {
+      const dir = data.imports[phoneId].dir
+      const { report } = applyWorkspaceZip({ root: dir, zip, platform: process.platform, base: data.bases?.[dir] ?? {} })
+      rememberBase(dir, manifest, report)
+      applied = [...report.created, ...report.written, ...report.conflicts.map((c) => c.path)]   // pominięte nie: przyjdą w następnym pobraniu
+      const counts = { created: report.created.length, written: report.written.length, conflicts: report.conflicts.length, skipped: report.skipped.length }
+      data.imports[phoneId] = { ...(data.imports[phoneId] ?? { from: device.name, originRoot: manifest.origin?.root ?? null }), dir, ...counts, at: Date.now() }
+      note = `; pliki z ${device.name} -> ${dir}: ${counts.created} nowych, ${counts.written} zaktualizowanych, ${counts.conflicts} konfliktów, ${counts.skipped} pominiętych`
+    }
+    if (manifest.deleted?.length) note += `; usunięte na ${device.name} (tu zostają): ${manifest.deleted.slice(0, 5).join(', ')}`
+    if (ack && manifest.pullId) {
+      // Pliki są już na telefonie; nieudane potwierdzenie zostawia pullPending (ponowienie pobierze to samo i potwierdzi).
+      try {
+        const r = await remote(device, `/links/${encodeURIComponent(linkId)}/files-applied`, { method: 'POST', body: JSON.stringify({ pullId: manifest.pullId, applied }) })
+        note += `; potwierdzone na ${device.name} (${r.merged ?? applied.length} sum)`
+      } catch (error) {
+        save()
+        return `${note}; POTWIERDZENIE na ${device.name} nie doszło (${describe(error)}), ponowię`
+      }
+    }
+    delete data.pullPending[phoneId]
+    save()
+    return note
+  }
+
+  /** Kopia tej sesji PC na telefonie z aktywnym powiązaniem (lista z komputera), o ile sesja na telefonie wciąż istnieje. */
+  async function linkedCopy(device, pcSessionId) {
+    if (!SYNC_ENABLED || !(await supportsSync(device))) return null
+    let links
+    try { ({ links } = await remote(device, '/links', { timeoutMs: 15000 })) } catch { return null }   // bez listy: jak dotąd nowa kopia
+    const link = (Array.isArray(links) ? links : []).find((l) => l.pcSessionId === pcSessionId && l.phoneSessionId)
+    if (!link) return null
+    let observed
+    try { observed = await ctx.get('sessionQuery').observeSession(link.phoneSessionId) } catch { return null }   // kopię usunięto
+    try { return { phoneSessionId: link.phoneSessionId, linkId: link.linkId, cwd: observed?.header?.cwd ?? null } } finally { observed?.[Symbol.dispose]?.() }
+  }
+  /** ZIP plików projektu z wpisu skrzynki albo null (komputer bez workspace-files, brak plików, pusty manifest). */
+  async function fetchFiles(device, transferId, title = null, sessionId = null) {
+    const caps = await deviceCaps(device)
+    if (!caps.files) return null
+    // Cały katalog sesji PC (też pliki zrobione powłoką), gdy PC to umie; decyzja usera: zawsze cały projekt.
+    const fr = await remoteFetch(device, `/outbox/${encodeURIComponent(transferId)}/files${caps.filesProject ? '?scope=project' : ''}`, { timeoutMs: TRANSFER_TIMEOUT_MS })
+    if (fr.status === 404) return null
+    if (!fr.ok) throw new Error(`HTTP ${fr.status} przy pobieraniu plików projektu`)
+    const zip = await readTracked(fr, { sessionId, dir: 'in', title, device: device.name })
+    const { manifest } = readWorkspaceZip(zip)
+    return manifest.files?.length ? { zip, manifest } : null   // pusty manifest: bez nowego obszaru, jak dotąd
+  }
+  /** Zapisuje pliki projektu do `dir` dla sesji telefonu; błąd tylko logujemy (sesja już jest, ponowienie dałoby drugą). */
+  function applyFiles(device, phoneSessionId, dir, files) {
+    try {
+      const { report } = applyWorkspaceZip({ root: dir, zip: files.zip, platform: process.platform, base: data.bases?.[dir] ?? {} })
+      rememberBase(dir, files.manifest, report)
+      const counts = { created: report.created.length, written: report.written.length, conflicts: report.conflicts.length, skipped: report.skipped.length }
+      data.imports[phoneSessionId] = { from: device.name, originRoot: files.manifest.origin?.root ?? null, dir, scope: files.manifest.scope ?? 'agent', ...counts, at: Date.now() }
+      save()
+      return `; pliki -> ${dir}: ${counts.created} nowych, ${counts.written} zaktualizowanych, ${counts.conflicts} konfliktów, ${counts.skipped} pominiętych${report.skipped.length ? ` (${report.skipped.slice(0, 5).map((x) => `${x.path}: ${x.reason}`).join(', ')})` : ''}`
+    } catch (error) { return `; PLIKI NIE ZAPISANE w ${dir}: ${describe(error)}` }
+  }
 
   async function pullOutboxes() {
     if (pulling) return
@@ -255,19 +424,40 @@ export function apply(ctx) {
           const t0 = Date.now()
           if (imported.has(item.transferId)) { await acknowledge(device, item.transferId); continue }
           try {
+            // Ta sama sesja PC jest już powiązana z kopią na telefonie: kopia dostaje nowe tury synchronizacją, więc zamiast
+            // drugiej kopii aktualizujemy istniejącą (pliki projektu + natychmiastowy obieg synchronizacji).
+            const existing = await linkedCopy(device, item.sessionId)
+            const files = await fetchFiles(device, item.transferId, item.title ?? null, existing?.phoneSessionId ?? null)
+            if (existing) {
+              let filesNote = ''
+              if (files) {
+                const dir = existing.cwd && data.imports[existing.phoneSessionId]?.dir === existing.cwd ? existing.cwd : (await projectTarget(files.manifest)).path
+                filesNote = applyFiles(device, existing.phoneSessionId, dir, files)
+              }
+              imported.set(item.transferId, existing.phoneSessionId)
+              await acknowledge(device, item.transferId)
+              retryAt.delete(item.transferId)
+              received.unshift({ at: Date.now(), from: device.name, title: item.title ?? null, sessionId: existing.phoneSessionId, updated: true, files: data.imports[existing.phoneSessionId] ?? null })
+              received.splice(10)
+              console.log(`[dsh-code] sesja „${item.title ?? item.sessionId}” z ${device.name} jest już na telefonie (${existing.phoneSessionId}, powiązana): bez nowej kopii, synchronizuję${filesNote}`)
+              syncLinks().catch((e) => console.log(`[dsh-code] synchronizacja: ${describe(e)}`))
+              continue
+            }
             const res = await remoteFetch(device, `/outbox/${encodeURIComponent(item.transferId)}`, { timeoutMs: TRANSFER_TIMEOUT_MS })
             if (res.status === 404) continue   // anulowane albo odebrane w międzyczasie
             if (!res.ok) throw new Error(`HTTP ${res.status} przy pobieraniu sesji`)
-            const zip = Buffer.from(await res.arrayBuffer())
-            const result = await importSession((service) => ctx.get(service), zip, importOptions)
+            const zip = await readTracked(res, { sessionId: null, dir: 'in', title: item.title ?? null, device: device.name })
+            const target = files ? await projectTarget(files.manifest) : null
+            const result = await importSession((service) => ctx.get(service), zip, target ? { ...importOptions, workspaceId: target.id } : importOptions)
+            const filesNote = files ? applyFiles(device, result.sessionId, target.path, files) : ''
             imported.set(item.transferId, result.sessionId)
             await acknowledge(device, item.transferId)
             // Synchronizacja: właścicielem zostaje nadawca (PC), kopia na telefonie jest lustrem do czasu przejęcia.
             await registerLink(device, { pcSessionId: item.sessionId, phoneSessionId: result.sessionId, owner: 'pc', sharedCount: result.events, title: result.title ?? item.title ?? undefined })
             retryAt.delete(item.transferId)
-            received.unshift({ at: Date.now(), from: device.name, title: result.title ?? item.title ?? null, sessionId: result.sessionId })
+            received.unshift({ at: Date.now(), from: device.name, title: result.title ?? item.title ?? null, sessionId: result.sessionId, files: data.imports[result.sessionId] ?? null })
             received.splice(10)
-            console.log(`[dsh-code] odebrano sesję „${result.title ?? item.title ?? item.sessionId}” z ${device.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}${result.modelChanged ? `; model ${result.modelChanged.from} niedostępny tutaj -> ${result.modelChanged.to}` : ''}`)
+            console.log(`[dsh-code] odebrano sesję „${result.title ?? item.title ?? item.sessionId}” z ${device.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}${result.modelChanged ? `; model ${result.modelChanged.from} niedostępny tutaj -> ${result.modelChanged.to}` : ''}${filesNote}`)
           } catch (error) {
             retryAt.set(item.transferId, Date.now() + OUTBOX_RETRY_MS)
             console.log(`[dsh-code] odbiór sesji „${item.title ?? item.sessionId}” z ${device.name} nie powiódł się (ponowię za ${OUTBOX_RETRY_MS / 60000} min): ${describe(error)}`)
@@ -316,7 +506,9 @@ export function apply(ctx) {
     if (!exported.ok) throw Object.assign(new Error(`Eksport sesji na telefonie nie powiódł się (HTTP ${exported.status}).`), { status: 502 })
     const zip = Buffer.from(await exported.arrayBuffer())
     const t0 = Date.now()
-    const result = await remote(target, '/sessions/import', { method: 'POST', body: zip, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS })
+    const up = trackedUpload(zip, { sessionId, dir: 'out', title: null, device: target.name })
+    let result
+    try { result = await remote(target, '/sessions/import', { method: 'POST', ...up.init, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS }) } finally { up.end() }
     console.log(`[dsh-code] wysłano sesję ${sessionId} na ${target.name}: ${result.events} zdarzeń, ${result.attachments} załączników, ${zip.length} B, ${((Date.now() - t0) / 1000).toFixed(1)} s -> ${result.sessionId}${result.modelChanged ? `; na PC model ${result.modelChanged.from} -> ${result.modelChanged.to}` : ''}`)
     // Synchronizacja: właścicielem zostaje nadawca (telefon), kopia na PC jest lustrem do czasu przejęcia.
     await registerLink(target, { pcSessionId: result.sessionId, phoneSessionId: sessionId, owner: 'phone', sharedCount: result.events, title: result.title ?? undefined })
@@ -372,7 +564,7 @@ export function apply(ctx) {
       const res = await remoteFetch(device, `/links/${id}/events?after=${link.pcMark}&epoch=${link.epoch}`, { timeoutMs: TRANSFER_TIMEOUT_MS })
       if (!res.ok) throw new Error(`ogon z ${device.name}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`)
       const to = Number(res.headers.get('x-dsh-to'))
-      const zip = Buffer.from(await res.arrayBuffer())
+      const zip = await readTracked(res, { sessionId: phoneId, dir: 'in', title: link.title ?? null, device: device.name })
       const map = new SeqMap(link.runs)
       const applied = await appendTail(get, phoneId, zip, (pcSeq) => map.toPhone(pcSeq))
       // Agent lustra nie widzi dopisanych tur: wyrównanie jego licznika do logu (inaczej po przejęciu powtórzyłby numer tury).
@@ -384,6 +576,13 @@ export function apply(ctx) {
       console.log(`[dsh-code] synchronizacja ${device.name} → telefon: ${applied.pairs.length} zdarzeń (PC ${link.pcMark + 1}..${to}), ${((Date.now() - t0) / 1000).toFixed(1)} s${applied.error ? `; przerwana: ${applied.error}` : ''} [epoch ${updated.epoch}]`)
       return
     }
+    // Właścicielem jest telefon: zaległe pobranie plików z PC (nieudane przy przejęciu) ponawiamy; dopóki się nie uda,
+    // nie oddajemy pisania (zwrot starych plików nadpisałby zmiany z PC), ale tury rozmowy synchronizujemy dalej.
+    let filesStale = null
+    if (data.pullPending?.[phoneId]) {
+      try { const note = await pullFiles(device, id, phoneId); console.log(`[dsh-code] ponowione pobranie plików z ${device.name} dla ${phoneId}${note}`) } catch (error) { filesStale = `Pliki projektu z komputera jeszcze nie doszły: ${describe(error)}` }
+      if (!filesStale && data.pullPending?.[phoneId]) filesStale = `Komputer ${device.name} nie potwierdził jeszcze pobranych plików projektu.`   // pliki są, potwierdzenie nie
+    }
     // Właścicielem jest telefon: wyślij zakończone tury, potem ewentualnie oddaj pisanie na prośbę PC.
     let phoneMark = link.phoneMark, epoch = link.epoch
     if (!dirty.has(phoneId) && checked.has(phoneId) && !link.claim) return   // nic nowego od ostatniego obiegu
@@ -393,17 +592,23 @@ export function apply(ctx) {
       const tail = await readTail(get, phoneId, phoneMark)
       if (tail.toSeq > phoneMark) {
         const t0 = Date.now()
-        const res = await remoteFetch(device, `/links/${id}/events?after=${phoneMark}&to=${tail.toSeq}&epoch=${epoch}`, { method: 'POST', body: tail.zip, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS })
-        const body = await res.json().catch(() => ({}))
+        const up = trackedUpload(tail.zip, { sessionId: phoneId, dir: 'out', title: link.title ?? null, device: device.name })
+        let res, body
+        try {
+          res = await remoteFetch(device, `/links/${id}/events?after=${phoneMark}&to=${tail.toSeq}&epoch=${epoch}`, { method: 'POST', ...up.init, headers: { 'content-type': 'application/zip' }, timeoutMs: TRANSFER_TIMEOUT_MS })
+          body = await res.json().catch(() => ({}))
+        } finally { up.end() }
         if (!res.ok) { state.error = body.error ?? `HTTP ${res.status}`; throw new Error(`ogon do ${device.name}: ${state.error}`) }
         phoneMark = body.phoneMark ?? phoneMark; epoch = body.epoch ?? epoch
         state.error = null
         console.log(`[dsh-code] synchronizacja telefon → ${device.name}: ${body.applied ?? 0} zdarzeń (telefon ${link.phoneMark + 1}..${tail.toSeq}), ${((Date.now() - t0) / 1000).toFixed(1)} s`)
       }
     }
+    if (filesStale) { state.error = filesStale; return }
     if (link.claim) {
       const now = await sessionState(get, phoneId)
       if (now.busy) return   // tura w toku: oddamy pisanie po jej zakończeniu
+      await returnFiles(device, link, phoneId)   // pliki projektu zmienione na telefonie jadą na PC PRZED oddaniem pisania
       const confirmed = await remote(device, `/links/${id}/claim-confirm`, { method: 'POST', body: JSON.stringify({ epoch, phoneBoundary: now.boundary ?? phoneMark, phoneBusy: false }) })
       Object.assign(state, { owner: confirmed.owner, claim: null, epoch: confirmed.epoch })
       const reload = tryReload(phoneId)
@@ -430,7 +635,35 @@ export function apply(ctx) {
     console.log(`[dsh-code] rozjazd z ${device.name}: komputer przejął pisanie bez telefonu, a telefon miał nieoddane tury — sesja ${phoneId} została gałęzią „${branchTitle}”, powiązanie odłączone`)
   }
 
+  // Trwałe usuwanie sesji (wtyczka archiwizacji, np. @michengai/dsh-archive-manager, dokłada workspaceRegistry.deleteSession):
+  // sesji powiązanej synchronizacją z komputerem nie usuwamy, tylko odsyłamy do odłączenia. Opakowujemy leniwie w każdym
+  // obiegu, bo wtyczka archiwizacji może kopiować swoje metody na rejestr po nas; komunikat trafia do klienta jako treść błędu.
+  function guardSyncedDelete() {
+    const reg = ctx.get?.('workspaceRegistry')
+    const current = reg?.deleteSession
+    if (typeof current !== 'function' || current.dshCodeGuard) return
+    const guarded = async function (sessionId, ...rest) {
+      const link = linkState.get(sessionId)
+      if (link) {
+        console.log(`[dsh-code] odmowa usunięcia sesji ${sessionId}: synchronizowana z ${link.deviceName ?? 'komputerem'}`)
+        throw new Error(`ta sesja jest synchronizowana z komputerem ${link.deviceName ?? ''}. Najpierw odłącz synchronizację: dotknij ikony komputera przy tej sesji na liście, potem usuń ją ponownie.`.replace('  ', ' '))
+      }
+      const result = await current.call(this, sessionId, ...rest)
+      // sesja usunięta z dysku: jej notka o plikach z komputera też (katalog projektu zostaje, to praca usera)
+      if (data.imports?.[sessionId]) { delete data.imports[sessionId]; save() }
+      return result
+    }
+    guarded.dshCodeGuard = true
+    reg.deleteSession = guarded
+  }
+  ctx.effect(() => {
+    const t = setInterval(() => { try { guardSyncedDelete() } catch (e) { console.log(`[dsh-code] blokada usuwania: ${e.message}`) } }, 5000)
+    t.unref?.()
+    return () => clearInterval(t)
+  }, 'dsh-code: blokada usuwania sesji synchronizowanych')
+
   async function syncLinks() {
+    try { guardSyncedDelete() } catch (e) { console.log(`[dsh-code] blokada usuwania: ${e.message}`) }
     if (!SYNC_ENABLED || syncing) return
     syncing = true
     try {
@@ -503,7 +736,13 @@ export function apply(ctx) {
       // Nowy właściciel: licznik tur agenta telefonu = ostatnia tura w logu, zanim przyjmie pierwszą turę.
       const reload = tryReload(phoneId)
       if (reload.error) throw Object.assign(new Error(`Przejęto pisanie, ale wyrównanie licznika tur nie powiodło się: ${reload.error}`), { status: 409 })
-      console.log(`[dsh-code] telefon przejął pisanie sesji ${phoneId} od ${device.name} [epoch ${body.epoch}]`)
+      if (data.imports?.[phoneId]?.dir) { data.pullPending[phoneId] = true; save() }
+      let filesNote
+      try { filesNote = await pullFiles(device, linkId, phoneId) } catch (error) {
+        console.log(`[dsh-code] telefon przejął pisanie sesji ${phoneId} od ${device.name} [epoch ${body.epoch}], ale pliki z komputera nie doszły: ${describe(error)} (ponawiam co obieg)`)
+        throw Object.assign(new Error(`Przejęto pisanie, ale pliki projektu z komputera nie doszły (${describe(error)}). Ponawiam automatycznie; zanim agent zmieni pliki projektu, poczekaj na ich pobranie.`), { status: 409 })
+      }
+      console.log(`[dsh-code] telefon przejął pisanie sesji ${phoneId} od ${device.name} [epoch ${body.epoch}]${filesNote}`)
       return { owner: body.owner }
     } finally { syncing = false }
   }
@@ -575,7 +814,7 @@ export function apply(ctx) {
       const route = `${req.method} ${url.pathname.slice(PREFIX.length)}`
       try {
         if (route === 'GET /state') return send(res, 200, await state())
-        if (route === 'GET /transfer') return send(res, 200, { targets: (await transferTargets()).map((d) => ({ id: d.id, name: d.name })), received, links: [...linkState.entries()].map(([phoneSessionId, v]) => ({ phoneSessionId, ...v })) })
+        if (route === 'GET /transfer') return send(res, 200, { active: [...active.values()].map((e) => ({ sessionId: e.sessionId, dir: e.dir, bytes: e.bytes, total: e.total, title: e.title, device: e.device, ms: Date.now() - e.at })), targets: (await transferTargets()).map((d) => ({ id: d.id, name: d.name })), received, links: [...linkState.entries()].map(([phoneSessionId, v]) => ({ phoneSessionId, ...v })) })
         const lm = /^\/links\/([0-9a-f-]{36})(\/claim|\/resume)?$/.exec(url.pathname.slice(PREFIX.length))
         if (lm && req.method === 'POST' && lm[2] === '/claim') return send(res, 200, await claimOnPhone(lm[1]))
         if (lm && req.method === 'POST' && lm[2] === '/resume') return send(res, 200, await resumeLink(lm[1]))

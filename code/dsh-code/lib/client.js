@@ -127,6 +127,7 @@ window.__ModuleLoader__.load({
         const tsText = !ts ? '' : ts.via === 'tsnet' ? t('tsRunning') : ts.backendState === 'NeedsLogin' ? t('tsNeedsLogin') : ts.backendState === 'Starting' ? t('tsStarting') : ts.backendState === 'Unavailable' ? t('tsVpn') : ts.backendState === 'Stopped' ? t('tsStopped') : `${t('tsVpn')} (${ts.backendState})`
         return h('div', { style: S.page },
           h('div', { style: S.title }, t('code')),
+          h(TransferDock, { all: true }),
           ts ? h('div', { style: { ...S.status, justifyContent: 'center', opacity: 0.8, marginBottom: 8, flexWrap: 'wrap', whiteSpace: 'normal' } },
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, color: ts.via === 'tsnet' ? GREEN : 'inherit' } }, h(LaptopIcon, { off: ts.via !== 'tsnet' }), `${t('tailscale')}: ${tsText}`),
             ts.authURL ? h('a', { href: ts.authURL, target: '_blank', rel: 'noopener', style: { ...S.pill, padding: '6px 12px', textDecoration: 'none' } }, t('tsLogin')) : null,
@@ -232,6 +233,7 @@ window.__ModuleLoader__.load({
         blocked: 'Ta sesja jest lustrem rozmowy z komputera. Przejmij pisanie, aby kontynuować tutaj.',
         bannerMirror: 'Lustro sesji z komputera: nowe tury pojawiają się tu same.', claim: 'Przejmij pisanie tutaj', claimFailed: 'Nie udało się przejąć pisania',
         paused: 'Synchronizacja wstrzymana', resume: 'Wznów synchronizację', resumeFailed: 'Nie udało się wznowić synchronizacji',
+        receiving: 'Odbieram', sendingTo: 'Wysyłam', from: 'z', to: 'na', newSession: 'nową sesję',
       },
       en: {
         send: 'Export to computer', sending: 'Sending to the computer…', done: 'Sent to the computer', failed: 'Could not send the session to the computer',
@@ -240,12 +242,13 @@ window.__ModuleLoader__.load({
         blocked: 'This session mirrors a conversation on the computer. Take over writing to continue here.',
         bannerMirror: 'Mirror of the computer session: new turns appear here on their own.', claim: 'Take over writing here', claimFailed: 'Could not take over writing',
         paused: 'Sync paused', resume: 'Resume sync', resumeFailed: 'Could not resume sync',
+        receiving: 'Receiving', sendingTo: 'Sending', from: 'from', to: 'to', newSession: 'a new session',
       },
     }
     const xferCopy = () => ((document.documentElement.lang || '').toLowerCase().startsWith('pl') ? XFER_COPY.pl : XFER_COPY.en)
     /** Wspólny stan: komputery do eksportu + powiązania sesji telefonu (synchronizacja), z GET /api/dsh-code/transfer. */
     const transferStore = (() => {
-      let state = { targets: [], links: new Map() }
+      let state = { targets: [], links: new Map(), active: [] }
       let raw = ''
       const listeners = new Set()
       let timer = null
@@ -254,21 +257,24 @@ window.__ModuleLoader__.load({
           const res = await fetch('/api/dsh-code/transfer', { credentials: 'same-origin', cache: 'no-store' })
           if (!res.ok) { console.warn(`[dsh-code] transfer: HTTP ${res.status}`); return }
           const body = await res.json()
-          const next = JSON.stringify([body.targets ?? [], body.links ?? []])
+          const next = JSON.stringify([body.targets ?? [], body.links ?? [], body.active ?? []])
           if (next !== raw) {
             if (JSON.stringify(body.targets ?? []) !== JSON.stringify(state.targets)) console.log(`[dsh-code] komputery do eksportu: ${(body.targets ?? []).map((d) => d.name).join(', ') || 'brak'}`)
             raw = next
-            state = { targets: body.targets ?? [], links: new Map((body.links ?? []).map((l) => [l.phoneSessionId, l])) }
+            state = { targets: body.targets ?? [], links: new Map((body.links ?? []).map((l) => [l.phoneSessionId, l])), active: body.active ?? [] }
             for (const l of listeners) l()
           }
         } catch (error) { console.warn(`[dsh-code] transfer: ${error}`) }
       }
       return {
         refresh,
+        /** Szybkie odświeżanie od razu (np. po kliknięciu eksportu), zanim zwykły obieg zauważy transfer. */
+        kick() { if (listeners.size > 0) { window.clearTimeout(timer); timer = null; const tick = () => { void refresh().finally(() => { if (listeners.size > 0) timer = window.setTimeout(tick, state.active.length ? 400 : 5000) }) }; tick() } },
         subscribe(listener) {
           listeners.add(listener)
-          // Bez znanych komputerów co 3 s (pierwsze /info trwa kilka sekund), z powiązaniami co 5 s, inaczej co 30 s.
-          if (listeners.size === 1) { const tick = () => { void refresh().finally(() => { if (listeners.size > 0) timer = window.setTimeout(tick, !state.targets.length ? 3000 : state.links.size ? 5000 : 30000) }) }; tick() }
+          // W trakcie transferu co 0,4 s (postęp), bez znanych komputerów co 3 s (pierwsze /info trwa kilka sekund),
+          // z powiązaniami co 5 s, inaczej co 30 s.
+          if (listeners.size === 1) { const tick = () => { void refresh().finally(() => { if (listeners.size > 0) timer = window.setTimeout(tick, state.active.length ? 400 : !state.targets.length ? 3000 : state.links.size ? 5000 : 30000) }) }; tick() }
           return () => { listeners.delete(listener); if (listeners.size === 0 && timer !== null) { window.clearTimeout(timer); timer = null } }
         },
         snapshot: () => state,
@@ -276,10 +282,29 @@ window.__ModuleLoader__.load({
     })()
     const useTransfer = () => React.useSyncExternalStore(transferStore.subscribe, transferStore.snapshot)
     const linkStateOf = (link) => (link.diverged || link.paused ? 'diverged' : link.owner === 'phone' ? 'owner' : 'mirror')
+    // Puste obiegi synchronizacji nie migają: transfer widać od 300 ms trwania albo od 2 KB.
+    const visibleTransfer = (e) => e.ms >= 300 || (e.total ?? e.bytes) > 2048
+    const percentOf = (e) => (e.total ? Math.min(100, Math.round((e.bytes / e.total) * 100)) : null)
+    const STYLE_ID = 'dsh-code-transfer-style'
+    function ensureTransferStyle() {
+      if (document.getElementById(STYLE_ID)) return
+      const st = document.createElement('style'); st.id = STYLE_ID
+      st.textContent = '@keyframes dshcodeFlowIn{0%{transform:translateY(-3px);opacity:.2}60%{opacity:1}100%{transform:translateY(2px);opacity:.2}}' +
+        '@keyframes dshcodeFlowOut{0%{transform:translateY(2px);opacity:.2}60%{opacity:1}100%{transform:translateY(-3px);opacity:.2}}' +
+        '.dshcode-flow-in{animation:dshcodeFlowIn 1s ease-in-out infinite}.dshcode-flow-out{animation:dshcodeFlowOut 1s ease-in-out infinite}' +
+        '@media (prefers-reduced-motion: reduce){.dshcode-flow-in,.dshcode-flow-out{animation:none}}'
+      document.head.appendChild(st)
+    }
+    /** Cienki pasek postępu (bez rozmiaru: tylko pulsujący pasek ruchu). */
+    function ProgressBar({ entry, width = '100%' }) {
+      const pct = percentOf(entry)
+      return h('span', { style: { display: 'block', width, height: 2, borderRadius: 1, background: 'var(--dsw-alias-fill-secondary, rgba(127,127,127,.25))', overflow: 'hidden' } },
+        h('span', { className: pct === null ? `dshcode-flow-${entry.dir}` : undefined, style: { display: 'block', height: '100%', width: pct === null ? '100%' : `${pct}%`, background: 'var(--dsw-alias-state-business-primary)', transition: 'width .3s' } }))
+    }
 
     /** Komputer: strzałka w górę (wyślij), haczyk (wysłano), dwie strzałki (piszesz tutaj), kłódka (lustro), wykrzyknik (wstrzymane). */
-    function ComputerIcon({ state }) {
-      const common = { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
+    function ComputerIcon({ state, size = 14 }) {
+      const common = { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
       const screen = h('rect', { x: 1.5, y: 2.5, width: 13, height: 9, rx: 1.4 })
       const stand = h('path', { d: 'M5.5 14h5M8 11.5V14' })
       const marks = {
@@ -287,11 +312,21 @@ window.__ModuleLoader__.load({
         owner: 'M5.2 6.2h5.2l-1.4-1.3M10.8 7.8H5.6l1.4 1.3',
         mirror: 'M6.2 7.4h3.6v2.4H6.2zM6.9 7.4V6.5a1.1 1.1 0 0 1 2.2 0v.9',
         diverged: 'M8 4.6v3M8 9.4v.1',
+        in: 'M8 4.6v4.4M5.9 6.9L8 9l2.1-2.1',    // z komputera do telefonu
+        out: 'M8 9.2V4.8M5.9 6.8L8 4.7l2.1 2.1', // z telefonu na komputer
       }
-      return h('svg', common, screen, stand, h('path', { d: marks[state] ?? 'M8 9.2V4.8M5.9 6.8L8 4.7l2.1 2.1' }))
+      const flow = state === 'in' || state === 'out'
+      if (flow) ensureTransferStyle()
+      return h('svg', common, screen, stand, h('path', { d: marks[state] ?? 'M8 9.2V4.8M5.9 6.8L8 4.7l2.1 2.1', className: flow ? `dshcode-flow-${state}` : undefined }))
     }
 
-    function rowButton({ label, state, busy, onClick, hover, setHover }) {
+    function rowButton({ label, state, busy, onClick, hover, setHover, transfer }) {
+      if (transfer) {   // transfer w toku: strzałka do/z telefonu + pasek pod ikoną, procent w podpisie
+        const c = xferCopy(), pct = percentOf(transfer)
+        const text = `${transfer.dir === 'in' ? c.receiving : c.sendingTo}${pct === null ? '…' : ` ${pct}%`}${transfer.device ? ` (${transfer.dir === 'in' ? c.from : c.to} ${transfer.device})` : ''}`
+        return h('span', { title: text, 'aria-label': text, role: 'progressbar', 'aria-valuenow': pct ?? undefined, style: { flex: 'none', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 1, width: 16, color: 'var(--dsw-alias-state-business-primary)' } },
+          h(ComputerIcon, { state: transfer.dir }), h(ProgressBar, { entry: transfer, width: 14 }))
+      }
       const accent = state === 'busy' || state === 'done' || state === 'owner'
       const color = state === 'diverged' ? 'var(--dsw-alias-state-error-primary, #e5484d)' : accent ? 'var(--dsw-alias-state-business-primary)' : hover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)'
       return h('button', {
@@ -306,10 +341,15 @@ window.__ModuleLoader__.load({
     }
 
     function ExportToComputerButton({ sessionId }) {
-      const { targets, links } = useTransfer()
+      const { targets, links, active } = useTransfer()
       const [state, setState] = useState('idle')
       const [hover, setHover] = useState(false)
       const link = links.get(sessionId)
+      const transfer = active.find((e) => e.sessionId === sessionId && visibleTransfer(e))
+      const shownRow = transfer ? transfer.dir : null
+      const lastRow = useRef(null)
+      useEffect(() => { if (lastRow.current !== shownRow) { if (shownRow || lastRow.current) console.log(`[dsh-code] wiersz sesji ${sessionId}: ${shownRow ? `transfer ${shownRow}` : 'koniec transferu'}`); lastRow.current = shownRow } }, [shownRow])
+      if (transfer) return rowButton({ transfer })
       const c = xferCopy()
       if (link) {
         const ls = linkStateOf(link)
@@ -332,6 +372,7 @@ window.__ModuleLoader__.load({
         event.preventDefault(); event.stopPropagation()
         if (state === 'busy') return
         setState('busy')
+        transferStore.kick()   // postęp wysyłki widać od razu
         try {
           const res = await fetch('/api/dsh-code/export', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId }) })
           const body = await res.json().catch(() => ({}))
@@ -347,6 +388,34 @@ window.__ModuleLoader__.load({
     }
 
     const sessionIdOf = (session) => session?.sessionId ?? session?.id ?? session?.header?.id
+
+    /** Ikona „Code” w pasku bocznym: w trakcie transferu animowana strzałka (ruch widać z każdego miejsca apki). */
+    function CodeNavIcon(props) {
+      const { active } = useTransfer()
+      const e = active.find(visibleTransfer)
+      const shown = e ? e.dir : 'code'
+      const last = useRef(null)
+      useEffect(() => { if (last.current !== shown) { console.log(`[dsh-code] ikona Code w pasku bocznym: ${shown === 'code' ? 'zwykła' : `strzałka ${shown}`}`); last.current = shown } }, [shown])
+      return e ? h(ComputerIcon, { state: e.dir, size: props?.size ?? 20 }) : h(CodeIcon, props)
+    }
+
+    /** Transfery bez wiersza na liście (nowa sesja z komputera, jeszcze nie zaimportowana): pasek nad polem pisania. */
+    function TransferDock({ all = false } = {}) {
+      const { active } = useTransfer()
+      const rows = active.filter((e) => (all || !e.sessionId) && visibleTransfer(e))   // all: ekran Code (tam nie ma pola pisania ani wierszy sesji telefonu)
+      const lastDock = useRef(0)
+      useEffect(() => { if ((rows.length > 0) !== (lastDock.current > 0)) console.log(`[dsh-code] pasek transferu (${all ? 'ekran Code' : 'nad polem pisania'}): ${rows.length ? rows.map((e) => `${e.dir} ${e.title ?? e.sessionId ?? ''}`).join('; ') : 'koniec'}`); lastDock.current = rows.length }, [rows.length])
+      if (rows.length === 0) return null
+      const c = xferCopy()
+      return h('div', { role: 'status', style: { display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', marginBottom: 8, borderRadius: 'var(--dsw-radius-md, 10px)', fontSize: 13, color: 'var(--dsw-alias-label-secondary)', background: 'var(--dsw-alias-fill-secondary, transparent)' } },
+        ...rows.map((e, i) => {
+          const pct = percentOf(e)
+          return h('div', { key: i, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('span', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, h(ComputerIcon, { state: e.dir }),
+              `${e.dir === 'in' ? c.receiving : c.sendingTo} ${e.title ? `„${e.title}”` : c.newSession}${e.device ? ` ${e.dir === 'in' ? c.from : c.to} ${e.device}` : ''}${pct === null ? '…' : ` — ${pct}%`}`),
+            h(ProgressBar, { entry: e }))
+        }))
+    }
 
     /** Pasek nad polem pisania w lustrze: informacja + „Przejmij pisanie tutaj” (dociągnięcie z PC, potem zmiana właściciela). */
     function MirrorBanner({ session }) {
@@ -403,10 +472,11 @@ window.__ModuleLoader__.load({
         const t = ctx.locale.bind(NS)
         const Page = makePage(t)
         ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL, locale: NS }, Page))
-        ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL, order: 5, label: () => t('code'), locale: NS }, CodeIcon))
+        ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL, order: 5, label: () => t('code'), locale: NS }, CodeNavIcon))
         try {
           ctx.slots.inject('sidebar.workspaces.session.row.action', () => ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'dsh-code.export-to-computer', order: 50 }, ExportToComputerButton))
           ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'dsh-code.mirror-banner', order: 50 }, MirrorBanner))
+          ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'dsh-code.transfer-dock', order: 40 }, TransferDock))
           syncComposerBlocks(ctx)
         } catch (error) { console.error(`[dsh-code] slot ikony: ${error?.stack ?? error}`) }
       },

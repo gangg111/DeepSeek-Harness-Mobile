@@ -29,7 +29,7 @@ function exportOf(id, text) {
 }
 
 /** Fałszywe usługi DSH: zapisują, co przyszło przez sessionPersistence/attachments/workspaceRegistry. */
-function fakeDsh(defaultPath) {
+function fakeDsh(defaultPath, opts = {}) {
   const sessions = []
   const services = {
     sessionPersistence: {
@@ -39,19 +39,24 @@ function fakeDsh(defaultPath) {
         return { append: async (ev) => { s.events.push(...ev) }, flush: async () => {}, close: async () => {} }
       },
     },
-    workspaceRegistry: { list: () => [{ id: 'def', path: defaultPath, attachSession: async () => {} }], resolveByPath: async () => undefined },
+    workspaceRegistry: {
+      created: [],
+      list() { return [{ id: 'def', path: defaultPath, attachSession: async () => {} }, ...this.created] },
+      async create(path, title) { let w = this.created.find((x) => x.path === path); if (!w) { w = { id: `ws-${this.created.length + 1}`, path, title, attachSession: async () => {} }; this.created.push(w) } return w },
+      resolveByPath: async () => undefined,
+    },
     attachments: { saveImage: async ({ data, mediaType }) => ({ attachmentId: IMG, mediaType, bytes: data.length, width: 1, height: 1 }) },
-    sessionQuery: { async observeSession() { return { [Symbol.dispose]() {} } }, async readTitle(id) { const s = sessions.find((x) => x.header.id === id); return { text: s?.events[1]?.data?.content?.[0]?.text ?? null } } },
+    sessionQuery: { async observeSession(id) { return { ...(opts.observe?.(id) ?? {}), [Symbol.dispose]() {} } }, async readTitle(id) { const s = sessions.find((x) => x.header.id === id); return { text: s?.events[1]?.data?.content?.[0]?.text ?? null } } },
     sessionController: { async list() { return { items: [] } }, async rename() {} },
   }
   return { sessions, get: (n) => services[n] }
 }
 
-async function computer() {
+async function computer(opts = {}) {
   const { createGateway } = await import(pathToFileURL(join(REMOTE, 'lib', 'gateway.js')).href)
   const { createApi } = await import(pathToFileURL(join(REMOTE, 'lib', 'api.js')).href)
   const { createOutbox } = await import(pathToFileURL(join(REMOTE, 'lib', 'outbox.js')).href)
-  const dsh = fakeDsh('C:\\Users\\A\\deepseek-harness-default-workspace')
+  const dsh = fakeDsh('C:\\Users\\A\\deepseek-harness-default-workspace', opts)
   const outbox = createOutbox(join(mkdtempSync(join(tmpdir(), 'pc-outbox-')), 'outbox.json'))
   const exports = { 's-pc': exportOf('s-pc', 'sesja z komputera') }
   const api = createApi({
@@ -64,6 +69,7 @@ async function computer() {
   const gwPort = await listen(gw.server)
   const serve = http.createServer((req, res) => {   // `tailscale serve`: dokleja tożsamość właściciela
     const p = http.request({ host: '127.0.0.1', port: gwPort, method: req.method, path: req.url, headers: { ...req.headers, 'tailscale-user-login': OWNER } }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res) })
+    p.on('error', () => res.destroy())
     req.pipe(p)
   })
   const servePort = await listen(serve)
@@ -89,7 +95,7 @@ async function phone() {
     res.writeHead(401); res.end()
   })
   const localPort = await listen(local)
-  let handler
+  let handler, promptContext
   const effects = []
   const ctx = {
     webServer: { port: localPort, register(route) { handler = route.handler; return () => {} } },
@@ -97,6 +103,7 @@ async function phone() {
     effect(fn) { const d = fn(); if (typeof d === 'function') effects.push(d) },
     get: dsh.get,
     emit: (e, p) => emitted.push([e, p]),
+    inject(deps, fn) { fn({ systemPrompt: { context(c) { promptContext = c } } }) },
   }
   apply(ctx)
   const server = http.createServer((req, res) => handler(req, res))
@@ -108,7 +115,7 @@ async function phone() {
     r.on('error', reject); if (body) r.write(JSON.stringify(body)); r.end()
   })
   return {
-    call, dsh, emitted,
+    call, dsh, emitted, note: (sessionId) => promptContext.text({ agent: { session: { id: sessionId } } }),
     async close() { for (const d of effects) d(); for (const s of [server, local]) { s.closeAllConnections(); await new Promise((r) => s.close(r)) } },
   }
 }
@@ -185,4 +192,116 @@ test('przenoszenie sesji: komputer → telefon (skrzynka) i telefon → komputer
   console.log = origLog
   assert.equal(logged.filter((m) => m.includes('nie odpowiada')).length, 1, `jeden wpis o błędzie: ${JSON.stringify(logged)}`)
   assert.match(logged[0], /HTTP 500|skrzynka padła/)
+})
+
+test('pliki projektu z sesją: komputer → telefon do osobnego obszaru, konflikt obok, sekrety i binarki pominięte', { skip: !REMOTE && 'brak DSH_REMOTE_PLUGIN' }, async (t) => {
+  const { mkdirSync, writeFileSync, readFileSync, readdirSync } = await import('node:fs')
+  const pcRoot = join(mkdtempSync(join(tmpdir(), 'pc-proj-')), 'PS5')
+  const put = (rel, text) => { mkdirSync(join(pcRoot, rel, '..'), { recursive: true }); writeFileSync(join(pcRoot, rel), text) }
+  put('a.txt', 'nowe z PC'); put('src/b.ps1', 'Write-Output ok'); put('.env', 'KEY=sekret'); put('bin/x.dll', 'MZ')
+  put('notes/z-powloki.txt', 'zrobione poleceniem, nie narzędziem agenta')   // tryb „cały projekt” (workspace-files-project)
+  const call = (seq, name, file_path) => ({ type: 'tool/call', seq, time: seq, data: { name, arguments: JSON.stringify({ file_path }) } })
+  const events = [call(1, 'write', join(pcRoot, 'a.txt')), call(2, 'edit', 'src/b.ps1'), call(3, 'write', join(pcRoot, '.env')), call(4, 'write', join(pcRoot, 'bin/x.dll'))]
+  const pc = await computer({ observe: () => ({ header: { cwd: pcRoot }, events }) })
+  const home = mkdtempSync(join(tmpdir(), 'phone-home-'))
+  const oldHome = process.env.HOME; process.env.HOME = home
+  mkdirSync(join(home, 'PS5')); writeFileSync(join(home, 'PS5', 'a.txt'), 'stare z telefonu')
+  const ph = await phone()
+  t.after(async () => { process.env.HOME = oldHome; await ph.close(); await pc.close() })
+
+  assert.equal((await ph.call('POST', '/devices', { url: pc.url })).status, 200)
+  pc.outbox.add('s-pc', 'PS5 z komputera')
+  await waitFor(() => ph.dsh.sessions.length === 1)
+  await waitFor(() => pc.outbox.waiting().length === 0)
+  const dest = join(home, 'PS5')
+  const got = ph.dsh.sessions[0]
+  assert.equal(got.header.cwd, dest, 'sesja dostaje katalog projektu jako cwd')
+  assert.deepEqual(ph.dsh.get('workspaceRegistry').created.map((w) => [w.path, w.title]), [[dest, 'PS5']], 'osobny obszar roboczy')
+  assert.equal(readFileSync(join(dest, 'a.txt'), 'utf8'), 'nowe z PC')
+  assert.equal(readFileSync(join(dest, 'src', 'b.ps1'), 'utf8'), 'Write-Output ok', 'ścieżka względna z edit')
+  assert.equal(readFileSync(join(dest, 'notes', 'z-powloki.txt'), 'utf8'), 'zrobione poleceniem, nie narzędziem agenta', 'cały projekt: plik spoza narzędzi agenta też przyszedł')
+  const kept = readdirSync(dest).filter((n) => n.startsWith('a.txt.przed-importem-'))
+  assert.equal(kept.length, 1); assert.equal(readFileSync(join(dest, kept[0]), 'utf8'), 'stare z telefonu', 'konflikt: stara wersja obok')
+  assert.ok(!readdirSync(dest).includes('.env') && !readdirSync(dest).includes('bin'), 'sekret i binarka nie przyjechały')
+  const note = ph.note(got.header.id)
+  assert.match(note, /PS5/); assert.ok(note.includes(dest)); assert.match(note, /2 created, 0 updated, 1 conflicts/); assert.match(note, /1 skipped/)   // bin/ w trybie całego projektu nie jest w ogóle przechodzone
+  assert.equal(ph.note('session-inna'), '', 'notka tylko w zaimportowanej sesji')
+  assert.equal(ph.note(undefined), '')
+
+  // 2. import tego samego projektu: a.txt zmieniony tylko na PC -> czysto; b.ps1 zmieniony na PC i na telefonie -> kopia
+  put('a.txt', 'v2 z PC'); put('src/b.ps1', 'Write-Output v2')
+  writeFileSync(join(dest, 'src', 'b.ps1'), 'zmiana na telefonie')
+  pc.outbox.add('s-pc', 'PS5 drugi raz')
+  await waitFor(() => ph.dsh.sessions.length === 2)
+  await waitFor(() => pc.outbox.waiting().length === 0)
+  assert.equal(readFileSync(join(dest, 'a.txt'), 'utf8'), 'v2 z PC')
+  assert.equal(readdirSync(dest).filter((n) => n.startsWith('a.txt.przed-importem-')).length, 1, 'bez nowej kopii a.txt (tylko ta z 1. importu)')
+  assert.equal(readFileSync(join(dest, 'src', 'b.ps1'), 'utf8'), 'Write-Output v2')
+  const keptB = readdirSync(join(dest, 'src')).filter((n) => n.startsWith('b.ps1.przed-importem-'))
+  assert.equal(keptB.length, 1); assert.equal(readFileSync(join(dest, 'src', keptB[0]), 'utf8'), 'zmiana na telefonie', 'zmiana z telefonu ocalała')
+  assert.ok(!readdirSync(dest).some((n) => n.includes('.dsh-base-')), 'bez śladów odłożonych plików')
+  const note2 = ph.note(ph.dsh.sessions[1].header.id)
+  assert.match(note2, /0 created, 2 updated, 1 conflicts/)   // a.txt czysto + niezmieniony notes/z-powloki.txt (identyczny = written)
+
+  // usunięcie sesji (wtyczka archiwizacji): notka znika, pliki projektu zostają
+  const reg = ph.dsh.get('workspaceRegistry')
+  reg.deleteSession = async () => ({ deleted: true })
+  await waitFor(() => reg.deleteSession.dshCodeGuard === true, 8000)
+  await reg.deleteSession(ph.dsh.sessions[1].header.id)
+  assert.equal(ph.note(ph.dsh.sessions[1].header.id), '', 'notka usuniętej sesji wyczyszczona')
+  assert.equal(readFileSync(join(dest, 'a.txt'), 'utf8'), 'v2 z PC', 'pliki projektu nietknięte')
+})
+
+test('nieudane /info nie wyłącza odbioru na 10 min: po powrocie komputera sesja przychodzi w kolejnym obiegu', { skip: !REMOTE && 'brak DSH_REMOTE_PLUGIN' }, async (t) => {
+  const pc = await computer()
+  let failInfo = false, infoCalls = 0
+  const flaky = http.createServer((req, res) => {   // przed bramą PC: na żądanie /info odpowiada 503 (zimne połączenie)
+    if (req.url.startsWith('/__remote/api/info')) { infoCalls++; if (failInfo && infoCalls > 1) { res.writeHead(503); return res.end('{}') } }   // 1. = sprawdzenie przy dodaniu
+    const p = http.request({ host: '127.0.0.1', port: new URL(pc.url).port, method: req.method, path: req.url, headers: req.headers }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res) })
+    p.on('error', () => res.destroy())   // zamykanie serwerów po teście: bez tego „socket hang up” jako uncaughtException
+    req.pipe(p)
+  })
+  const flakyPort = await listen(flaky)
+  const ph = await phone()
+  t.after(async () => { await ph.close(); flaky.closeAllConnections(); await new Promise((r) => flaky.close(r)); await pc.close() })
+  failInfo = true
+  assert.equal((await ph.call('POST', '/devices', { url: `http://127.0.0.1:${flakyPort}/` })).status, 200)
+  assert.deepEqual((await ph.call('GET', '/transfer')).json.targets, [], 'komputer chwilowo bez /info')
+  const before = infoCalls
+  failInfo = false
+  pc.outbox.add('s-pc', 'Po powrocie')
+  await waitFor(() => ph.dsh.sessions.length === 1, 3000)
+  assert.ok(infoCalls > before, 'telefon ponowił /info zamiast trzymać porażkę 10 min')
+})
+
+test('postęp: odbiór sesji z komputera widać w /transfer (bajty względem content-length), po imporcie lista pusta', { skip: !REMOTE && 'brak DSH_REMOTE_PLUGIN' }, async (t) => {
+  const pc = await computer()
+  const slow = http.createServer((req, res) => {   // przed bramą PC: eksport sesji oddawany porcjami co 150 ms
+    const p = http.request({ host: '127.0.0.1', port: new URL(pc.url).port, method: req.method, path: req.url, headers: req.headers }, (r) => {
+      if (!/^\/__remote\/api\/outbox\/[^/]+$/.test(req.url ?? '') || req.method !== 'GET') { res.writeHead(r.statusCode, r.headers); return r.pipe(res) }
+      const chunks = []; r.on('data', (c) => chunks.push(c)); r.on('end', () => {
+        const buf = Buffer.concat(chunks); const parts = 6, size = Math.ceil(buf.length / parts)
+        const { 'transfer-encoding': _te, ...headers } = r.headers
+        res.writeHead(r.statusCode, { ...headers, 'content-length': String(buf.length) })
+        let i = 0; const next = () => { if (i * size >= buf.length) return res.end(); res.write(buf.subarray(i * size, (i + 1) * size)); i++; setTimeout(next, 150) }; next()
+      })
+    })
+    p.on('error', () => res.destroy())
+    req.pipe(p)
+  })
+  const slowPort = await listen(slow)
+  const ph = await phone()
+  t.after(async () => { await ph.close(); slow.closeAllConnections(); await new Promise((r) => slow.close(r)); await pc.close() })
+  assert.equal((await ph.call('POST', '/devices', { url: `http://127.0.0.1:${slowPort}/` })).status, 200)
+  pc.outbox.add('s-pc', 'Powolna sesja')
+  let seen = null
+  for (const t0 = Date.now(); !seen && Date.now() - t0 < 5000; await new Promise((r) => setTimeout(r, 50))) {   // waitFor tu jest synchroniczne
+    seen = (await ph.call('GET', '/transfer')).json.active.find((e) => e.dir === 'in' && e.total > 0 && e.bytes > 0 && e.bytes < e.total) ?? null
+  }
+  assert.ok(seen, 'w trakcie odbioru /transfer pokazuje częściowy postęp')
+  assert.equal(seen.title, 'Powolna sesja'); assert.equal(seen.sessionId, null, 'nowa sesja: bez wiersza na liście')
+  await waitFor(() => ph.dsh.sessions.length === 1, 5000)
+  let left = 1
+  for (const t0 = Date.now(); left && Date.now() - t0 < 3000; await new Promise((r) => setTimeout(r, 50))) left = (await ph.call('GET', '/transfer')).json.active.length
+  assert.equal(left, 0, 'po imporcie bez aktywnych transferów')
 })

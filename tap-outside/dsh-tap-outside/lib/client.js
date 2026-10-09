@@ -12,6 +12,10 @@ window.__ModuleLoader__.load({
 		function sidebarOpen() { const f = frame(); return !!f && !f.hasAttribute("data-sidebar-collapsed"); }
 		function insideSidebar(el) { return !!(el && el.closest && el.closest("[class*=\"_sidebarCol\"]")); }
 		function modalOpen() { return document.querySelector('[role="dialog"][aria-modal="true"]') !== null; }
+		// Menu „…” sesji i inne wyskakujące elementy panelu są renderowane poza jego kolumną: dotknięcie w nich to wybór pozycji, nie „obok”.
+		const POPUP = '[role="menu"], [role="menuitem"], [role="listbox"], [role="option"], [role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper]';
+		function insidePopup(el) { return !!(el && el.closest && el.closest(POPUP)); }
+		function describe(el) { if (!el || !el.tagName) return String(el); const cls = typeof el.className === "string" ? el.className.split(" ").slice(0, 2).join(".") : ""; return `${el.tagName.toLowerCase()}${el.getAttribute && el.getAttribute("role") ? `[role=${el.getAttribute("role")}]` : ""}${cls ? "." + cls : ""} „${(el.textContent || "").trim().slice(0, 30)}”`; }
 		function apply(ctx) {
 			let layout;
 			const collapse = () => {
@@ -24,9 +28,10 @@ window.__ModuleLoader__.load({
 				if (!window.matchMedia(MOBILE).matches) return;
 				if (!sidebarOpen() || modalOpen()) return;
 				const t = ev.target;
-				if (insideSidebar(t)) return;
+				if (insideSidebar(t) || insidePopup(t)) return;
 				if (t && t.closest && t.closest("[class*=\"_toggle\"], [aria-label*=\"panel boczny\"], [aria-label*=\"sidebar\"]")) return;
 				// dotknięcie poza panelem: tylko zamyka panel, nie trafia w element pod spodem
+				console.log(`[tap-outside] dotknięcie obok panelu, zamykam panel (cel: ${describe(t)})`);
 				ev.preventDefault(); ev.stopPropagation();
 				collapse();
 			};

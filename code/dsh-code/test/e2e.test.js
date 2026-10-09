@@ -36,6 +36,7 @@ async function pc() {
   const serve = http.createServer((req, res) => {
     const headers = { ...req.headers, 'tailscale-user-login': OWNER }
     const p = http.request({ host: '127.0.0.1', port: gwPort, method: req.method, path: req.url, headers }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res) })
+    p.on('error', () => res.destroy())
     req.pipe(p)
   })
   const servePort = await listen(serve)
