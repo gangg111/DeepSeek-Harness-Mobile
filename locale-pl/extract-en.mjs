@@ -3,7 +3,11 @@
 // zdefiniowanych wyżej jako `const en$1 = { ... }`. Wynik: en.json
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-const base = process.argv[2]; const out = process.argv[3];
+// Użycie: node extract-en.mjs <katalog @deepseek-ai> [kolejny…] <wynik.json>. Pakiet z pierwszego katalogu wygrywa: dsh 0.2.x
+// zagnieżdża część pakietów pod @deepseek-ai/dsh/node_modules (te ładuje), a resztę npm trzyma na górze node_modules.
+const bases = process.argv.slice(2, -1); const out = process.argv.at(-1);
+const seen = new Set(); const pkgs = [];
+for (const base of bases) for (const pkg of readdirSync(base)) if (!seen.has(pkg)) { seen.add(pkg); pkgs.push([base, pkg]); }
 const result = {}; const problems = [];
 const esc = (s) => s.replace(/[$]/g, '\\$');
 function braceMatch(src, start) {
@@ -30,7 +34,7 @@ function constValue(src, name) {
   if (src[at] === '{') return evalRefs(src, braceMatch(src, at));
   throw new Error(`definicja ${name} nie jest obiektem ani stringiem`);
 }
-for (const pkg of readdirSync(base)) {
+for (const [base, pkg] of pkgs) {
   const file = join(base, pkg, 'lib/client.js');
   let src; try { src = readFileSync(file, 'utf8'); } catch { continue; }
   const re = /locale\.register\(([\w$]+|"[^"]+")\s*,\s*\{/g; let m;

@@ -48,6 +48,7 @@ class MainActivity : Activity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     /** Adres bieżącej strony: mostek aktualizacji odpowiada tylko lokalnemu dsh, nie sesjom z komputera otwieranym przez Code. */
     @Volatile private var pageUrl: String? = null
+    private val tapOutsideJs by lazy { assets.open("tap-outside.js").bufferedReader().use { it.readText() } }
 
     /**
      * Mostek dla przycisku aktualizacji w interfejsie dsh (łatka android-patches/settings-update-bridge.mjs): dsh pokazuje
@@ -116,6 +117,8 @@ class MainActivity : Activity() {
                     pageUrl = url
                     if (!PLAIN_WEBVIEW) applyZoom()
                     syncBars()
+                    // Strona dsh z komputera (Code → remote) nie ma pluginu tap-outside: wstrzykujemy jego odpowiednik.
+                    if (url?.startsWith("http://127.0.0.1:3090/") != true) view.evaluateJavascript(tapOutsideJs, null)
                     // Diagnostyka układu (raz na stronę): szerokość CSS decyduje o mobilnym/desktopowym układzie dsh i dsh-qol (próg 768 px).
                     view.evaluateJavascript("JSON.stringify({w:innerWidth,h:innerHeight,dpr:devicePixelRatio,qolMobile:!!document.querySelector('[data-qol-appframe]'),bg:getComputedStyle(document.body).backgroundColor})") {
                         (application as App).log("webview: ${it?.trim('"')?.replace("\\\"", "\"")}")
@@ -127,7 +130,7 @@ class MainActivity : Activity() {
                 override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
                     val text = m.message() ?: return false
                     val level = m.messageLevel()
-                    if (level == android.webkit.ConsoleMessage.MessageLevel.ERROR || level == android.webkit.ConsoleMessage.MessageLevel.WARNING || text.contains("dsh-code"))
+                    if (level == android.webkit.ConsoleMessage.MessageLevel.ERROR || level == android.webkit.ConsoleMessage.MessageLevel.WARNING || text.contains("dsh-code") || text.contains("[tap-outside]"))
                         (application as App).log("js ${level.name.lowercase()}: ${text.take(600)} (${m.sourceId()?.substringAfterLast('/')?.take(80)}:${m.lineNumber()})")
                     return false
                 }

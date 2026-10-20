@@ -8,7 +8,9 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const nm = process.argv[2];
-const file = join(nm, '@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-native-command/lib/index.js');
+// dsh 0.2.0 zagnieżdżał pakiet pod @deepseek-ai/dsh, w 0.2.1 npm trzyma go na górze node_modules.
+const rel = '@deepseek-ai/dsh-native-command/lib/index.js';
+const file = [join(nm, '@deepseek-ai/dsh/node_modules', rel), join(nm, rel)].find(existsSync) ?? join(nm, rel);
 if (!existsSync(file)) { console.log('native-open-android: brak dsh-native-command — sprawdź, gdzie npm go umieścił'); process.exit(1); }
 let src = readFileSync(file, 'utf8');
 const edits = [

@@ -15,6 +15,8 @@ if (!file) { console.log('account-mobile: brak dsh-client-ui-settings-account, p
 let s = readFileSync(file, 'utf8');
 if (s.includes('[android] account')) { console.log('account-mobile: już nałożona'); process.exit(0); }
 const a = 'if (!("dshDesktop" in globalThis)) return;';
+// Od dsh 0.2.1 sekcja konta rejestruje się także w zwykłym kliencie Web („Register account UI in Desktop and plain Web clients”).
+if (!s.includes(a) && s.includes('const desktop = "dshDesktop" in globalThis;')) { console.log('account-mobile: niepotrzebna (upstream rejestruje sekcję konta także w Web)'); process.exit(0); }
 if (s.split(a).length !== 2) throw new Error('account-mobile: nie znaleziono warunku rejestracji sekcji konta — plugin zmienił się upstream');
 s = s.replace(a, 'if (!("dshDesktop" in globalThis) && !globalThis.DshMobileUpdate) return; /* [android] account: także w DSH Mobile */');
 writeFileSync(file, s);
